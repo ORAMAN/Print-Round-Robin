@@ -574,7 +574,7 @@ class PrintRoundRobinApp:
             self.theme_manager.apply(candidate.theme)
             self._update_theme_button()
             self._apply_dashboard_theme()
-            if os.name == "nt" and was_startup != candidate.start_with_windows:
+            if os.name == "nt" and (was_startup != candidate.start_with_windows or candidate.start_with_windows):
                 try:
                     windows.register_startup(candidate.start_with_windows, minimized=False)
                 except Exception as exc:
@@ -604,7 +604,7 @@ class PrintRoundRobinApp:
             was_startup = self.config.start_with_windows
             self.config = candidate
             self.store.save(candidate)
-            if os.name == "nt" and was_startup != candidate.start_with_windows:
+            if os.name == "nt" and (was_startup != candidate.start_with_windows or candidate.start_with_windows):
                 windows.register_startup(candidate.start_with_windows, minimized=False)
             self._load_config_to_controls()
             messagebox.showinfo("Импорт", "Настройки импортированы и сохранены.", parent=self.root)

@@ -147,6 +147,7 @@ class PrintRoundRobinApp:
 
         self.theme_manager = ThemeManager(self.root, self.config.theme)
         self.printer_cards: dict[str, dict] = {}
+        self._latest_printer_rows: dict[str, dict] = {}
         self.engine: RoundRobinEngine | None = None
         self.engine_starting = False
         self.admin_result_path: Path | None = None
@@ -424,7 +425,7 @@ class PrintRoundRobinApp:
             variable=self.auto_start_var,
         ).grid(row=row, column=0, columnspan=2, sticky="w", pady=(10, 4))
         ttk.Checkbutton(
-            frame, text="Запускать программу при входе в Windows (сворачивать в панель задач)",
+            frame, text="Запускать программу при входе в Windows (окно откроется развёрнутым)",
             variable=self.windows_startup_var,
         ).grid(row=row + 1, column=0, columnspan=2, sticky="w", pady=4)
 
@@ -570,9 +571,12 @@ class PrintRoundRobinApp:
             was_startup = self.config.start_with_windows
             self.store.save(candidate)
             self.config = candidate
+            self.theme_manager.apply(candidate.theme)
+            self._update_theme_button()
+            self._apply_dashboard_theme()
             if os.name == "nt" and was_startup != candidate.start_with_windows:
                 try:
-                    windows.register_startup(candidate.start_with_windows, minimized=True)
+                    windows.register_startup(candidate.start_with_windows, minimized=False)
                 except Exception as exc:
                     messagebox.showwarning("Автозапуск", str(exc), parent=self.root)
             self._refresh_printer_config_tree()
@@ -601,7 +605,7 @@ class PrintRoundRobinApp:
             self.config = candidate
             self.store.save(candidate)
             if os.name == "nt" and was_startup != candidate.start_with_windows:
-                windows.register_startup(candidate.start_with_windows, minimized=True)
+                windows.register_startup(candidate.start_with_windows, minimized=False)
             self._load_config_to_controls()
             messagebox.showinfo("Импорт", "Настройки импортированы и сохранены.", parent=self.root)
         except Exception as exc:
@@ -633,6 +637,7 @@ class PrintRoundRobinApp:
                 "", "end", iid=str(index),
                 values=("Да" if printer.enabled else "Нет", printer.name, printer.host, printer.port),
             )
+        self._rebuild_printer_cards()
 
     def _selected_printer_index(self) -> int | None:
         selected = self.printer_config_tree.selection()
@@ -921,8 +926,14 @@ class PrintRoundRobinApp:
         state = "unknown"
         title = "СОСТОЯНИЕ НЕИЗВЕСТНО"
 
+        has_critical = any(item.get("severity") == "critical" for item in errors)
+        has_warning = any(item.get("severity") == "warning" for item in errors)
         if tcp_down:
             state, title = "offline", "НЕТ СВЯЗИ"
+        elif has_critical:
+            state, title = "error", "КРИТИЧЕСКАЯ ОШИБКА"
+        elif has_warning:
+            state, title = "warning", "ПРЕДУПРЕЖДЕНИЕ"
         elif current_job:
             state, title = "transfer", "ПЕРЕДАЁТ ЗАДАНИЕ"
         elif self.config.snmp_enabled and snmp_available is False:

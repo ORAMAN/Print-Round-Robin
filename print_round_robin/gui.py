@@ -803,7 +803,8 @@ class PrintRoundRobinApp:
         self.config = config
         self.engine_starting = True
         self.start_button.configure(state="disabled")
-        self.engine_badge.configure(text="● ЗАПУСК...", foreground="#996600")
+        warning_color = self.theme_manager.status[self.theme_manager.current]["warning"]["text"]
+        self.engine_badge.configure(text="● ЗАПУСК...", foreground=warning_color)
 
         def worker():
             try:
@@ -884,9 +885,11 @@ class PrintRoundRobinApp:
         self.engine_starting = False
         self.start_button.configure(state="disabled" if running else "normal")
         self.stop_button.configure(state="normal" if running else "disabled")
+        state_key = "ready" if running else "offline"
+        badge_color = self.theme_manager.status[self.theme_manager.current][state_key]["text"]
         self.engine_badge.configure(
             text="● РАБОТАЕТ" if running else "● ОСТАНОВЛЕН",
-            foreground="#18733a" if running else "#a33",
+            foreground=badge_color,
         )
         self.footer_var.set(
             ("Ретранслятор активен" if running else "Ретранслятор остановлен") +
@@ -1076,6 +1079,18 @@ class PrintRoundRobinApp:
             else:
                 self._paint_printer_card(card, "unknown", "ОЖИДАНИЕ", "Нет свежих данных",
                                          "Тонер: —", "SNMP: —")
+        for tree_name in ("job_tree", "printer_config_tree"):
+            tree = getattr(self, tree_name, None)
+            if tree is not None:
+                tree.tag_configure("ok", foreground=self.theme_manager.status[self.theme_manager.current]["ready"]["text"])
+                tree.tag_configure("busy", foreground=self.theme_manager.status[self.theme_manager.current]["warning"]["text"])
+                tree.tag_configure("error", foreground=self.theme_manager.status[self.theme_manager.current]["error"]["text"])
+        if hasattr(self, "engine_badge"):
+            if self.engine_starting:
+                color = self.theme_manager.status[self.theme_manager.current]["warning"]["text"]
+                self.engine_badge.configure(foreground=color)
+            else:
+                self._set_engine_state(bool(self.engine and self.engine.running))
 
     def show_printer_details(self, host: str) -> None:
         row = getattr(self, "_latest_printer_rows", {}).get(host, {})

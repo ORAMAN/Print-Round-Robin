@@ -783,6 +783,51 @@ class PrintRoundRobinApp:
                 messagebox.showerror("Ошибка настроек", str(exc), parent=self.root)
             return False
 
+    def reset_settings(self):
+        if not self._ensure_engine_stopped():
+            return
+        confirmed = messagebox.askyesno(
+            "Сброс настроек",
+            "Вернуть настройки приложения к значениям по умолчанию?\n\n"
+            "Будут сброшены список и порядок принтеров, параметры ретранслятора, "
+            "SNMP и тема оформления.\n\n"
+            "Очередь Windows, установленный драйвер, журнал и уже принятые "
+            "задания печати не удаляются.",
+            icon="warning",
+            parent=self.root,
+        )
+        if not confirmed:
+            return
+
+        previous = self.config
+        defaults = AppConfig()
+        try:
+            self.store.save(defaults)
+        except Exception as exc:
+            messagebox.showerror("Сброс настроек", f"Не удалось сохранить настройки по умолчанию:\n{exc}", parent=self.root)
+            return
+
+        self.config = defaults
+        self._load_config_to_controls()
+        if os.name == "nt":
+            try:
+                windows.register_startup(False, minimized=False)
+            except Exception as exc:
+                self.logger.warning("Не удалось отключить автозапуск после сброса: %s", exc)
+                messagebox.showwarning(
+                    "Автозапуск",
+                    f"Настройки сброшены, но запись автозапуска удалить не удалось:\n{exc}",
+                    parent=self.root,
+                )
+        self.logger.info("Настройки приложения сброшены к значениям по умолчанию.")
+        messagebox.showinfo(
+            "Сброс настроек",
+            "Настройки восстановлены.\n\n"
+            "Для применения параметров печати запустите ретранслятор заново. "
+            "Настройки виртуальной очереди Windows не менялись.",
+            parent=self.root,
+        )
+
     def import_settings(self):
         if self.engine and self.engine.running:
             messagebox.showwarning("Импорт", "Сначала остановите ретранслятор.", parent=self.root)

@@ -327,7 +327,7 @@ class PrintRoundRobinApp:
     def _create_printer_card(self, printer: PrinterConfig, index: int) -> None:
         """Create one large status card; all ten cards remain visible in a 5x2 grid."""
         palette = self.theme_manager.palette
-        state_palette = self.theme_manager.status[self.theme_manager.current]["unknown"]
+        state_palette = self.theme_manager.status["unknown"]
         frame = tk.Frame(
             self.printer_grid,
             bg=state_palette["bg"],
@@ -809,7 +809,7 @@ class PrintRoundRobinApp:
         self.config = config
         self.engine_starting = True
         self.start_button.configure(state="disabled")
-        warning_color = self.theme_manager.status[self.theme_manager.current]["warning"]["text"]
+        warning_color = self.theme_manager.status["warning"]["text"]
         self.engine_badge.configure(text="● ЗАПУСК...", foreground=warning_color)
 
         def worker():
@@ -892,7 +892,7 @@ class PrintRoundRobinApp:
         self.start_button.configure(state="disabled" if running else "normal")
         self.stop_button.configure(state="normal" if running else "disabled")
         state_key = "ready" if running else "offline"
-        badge_color = self.theme_manager.status[self.theme_manager.current][state_key]["text"]
+        badge_color = self.theme_manager.status[state_key]["text"]
         self.engine_badge.configure(
             text="● РАБОТАЕТ" if running else "● ОСТАНОВЛЕН",
             foreground=badge_color,
@@ -1021,8 +1021,8 @@ class PrintRoundRobinApp:
 
     def _paint_printer_card(self, card: dict, state: str, title: str,
                             detail: str, toner: str, footer: str) -> None:
-        state_palette = self.theme_manager.status[self.theme_manager.current].get(
-            state, self.theme_manager.status[self.theme_manager.current]["unknown"]
+        state_palette = self.theme_manager.status.get(
+            state, self.theme_manager.status["unknown"]
         )
         palette = self.theme_manager.palette
         frame = card["frame"]
@@ -1081,7 +1081,7 @@ class PrintRoundRobinApp:
             self.printer_grid.configure(bg=palette["panel"])
         for key, item, dot in getattr(self, "_legend_widgets", []):
             item.configure(bg=palette["panel"])
-            dot.configure(bg=palette["panel"], fg=self.theme_manager.status[self.theme_manager.current][key]["dot"])
+            dot.configure(bg=palette["panel"], fg=self.theme_manager.status[key]["dot"])
         for host, card in self.printer_cards.items():
             row = getattr(self, "_latest_printer_rows", {}).get(host)
             if row:
@@ -1092,12 +1092,12 @@ class PrintRoundRobinApp:
         for tree_name in ("job_tree", "printer_config_tree"):
             tree = getattr(self, tree_name, None)
             if tree is not None:
-                tree.tag_configure("ok", foreground=self.theme_manager.status[self.theme_manager.current]["ready"]["text"])
-                tree.tag_configure("busy", foreground=self.theme_manager.status[self.theme_manager.current]["warning"]["text"])
-                tree.tag_configure("error", foreground=self.theme_manager.status[self.theme_manager.current]["error"]["text"])
+                tree.tag_configure("ok", foreground=self.theme_manager.status["ready"]["text"])
+                tree.tag_configure("busy", foreground=self.theme_manager.status["warning"]["text"])
+                tree.tag_configure("error", foreground=self.theme_manager.status["error"]["text"])
         if hasattr(self, "engine_badge"):
             if self.engine_starting:
-                color = self.theme_manager.status[self.theme_manager.current]["warning"]["text"]
+                color = self.theme_manager.status["warning"]["text"]
                 self.engine_badge.configure(foreground=color)
             else:
                 self._set_engine_state(bool(self.engine and self.engine.running))

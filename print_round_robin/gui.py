@@ -275,6 +275,9 @@ class PrintRoundRobinApp:
                 widget.bind("<Button-3>", self._show_text_context_menu, add="+")
                 widget.bind("<Shift-F10>", self._show_text_context_menu, add="+")
 
+        # Global bindings also cover the fields in modal dialogs created later.
+        self.root.bind_all("<Button-3>", self._show_text_context_menu, add="+")
+        self.root.bind_all("<Shift-F10>", self._show_text_context_menu, add="+")
         self.root.bind_all("<KeyPress>", self._handle_global_edit_shortcuts, add="+")
 
         self.printer_context_menu = tk.Menu(self.root, tearoff=0)
@@ -293,12 +296,18 @@ class PrintRoundRobinApp:
 
     def _show_text_context_menu(self, event):
         widget = event.widget
-        if self._is_editable_widget(widget):
-            widget.focus_set()
-            try:
-                self.text_context_menu.tk_popup(event.x_root, event.y_root)
-            finally:
-                self.text_context_menu.grab_release()
+        if not self._is_editable_widget(widget):
+            return None
+        widget.focus_set()
+        if str(getattr(event, "keysym", "")) == "F10":
+            x = widget.winfo_rootx() + 12
+            y = widget.winfo_rooty() + max(12, widget.winfo_height() // 2)
+        else:
+            x, y = event.x_root, event.y_root
+        try:
+            self.text_context_menu.tk_popup(x, y)
+        finally:
+            self.text_context_menu.grab_release()
         return "break"
 
     def _edit_focused(self, virtual_event: str):
@@ -362,16 +371,23 @@ class PrintRoundRobinApp:
 
         action = None
         if control:
-            action = {
-                "a": "select", "c": "<<Copy>>", "v": "<<Paste>>",
-                "x": "<<Cut>>", "z": "<<Undo>>", "y": "<<Redo>>",
-            }.get(key)
-            if key == "insert":
-                action = "<<Copy>>"
-        elif shift and key == "insert":
-            action = "<<Paste>>"
-        elif shift and key == "delete":
-            action = "<<Cut>>"
+            if key == "a":
+                action = "select"
+            elif key in ("c", "v", "x", "z", "y", "insert"):
+                # Standard Latin shortcuts are already handled by Tk's
+                # Entry/Text class bindings. Do not execute them a second
+                # time (a duplicate Paste would insert the clipboard twice).
+                if keysym in ("c", "v", "x", "z", "y", "insert"):
+                    return None
+                action = {
+                    "c": "<<Copy>>", "v": "<<Paste>>", "x": "<<Cut>>",
+                    "z": "<<Undo>>", "y": "<<Redo>>", "insert": "<<Copy>>",
+                }.get(key)
+        elif shift and key in ("insert", "delete"):
+            # In the normal Latin layout Tk handles these bindings itself.
+            if keysym in ("insert", "delete"):
+                return None
+            action = "<<Paste>>" if key == "insert" else "<<Cut>>"
 
         if action == "select":
             self._select_all_focused()

@@ -127,7 +127,8 @@ python main.py
 
 ```powershell
 python -m pip install pyinstaller
-pyinstaller --noconfirm --clean --onefile --windowed --name PrintRoundRobin main.py
+cd ...\Print-Round-Robin
+python -m PyInstaller --noconfirm --clean --onefile --windowed --name PrintRoundRobin main.py
 ```
 
 Готовый файл будет находиться в `dist\\PrintRoundRobin.exe`. Tkinter входит в стандартную поставку CPython; PyInstaller нужен только для необязательной сборки EXE.

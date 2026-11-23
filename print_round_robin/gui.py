@@ -16,6 +16,7 @@ from tkinter import filedialog, messagebox, ttk
 from . import windows
 from .config import AppConfig, ConfigStore, PrinterConfig, app_data_dir
 from .engine import RoundRobinEngine
+from .theme import ThemeManager
 
 
 class QueueLogHandler(logging.Handler):
@@ -123,8 +124,12 @@ class PrintRoundRobinApp:
     def __init__(self, root: tk.Tk, minimized: bool = False):
         self.root = root
         self.root.title("Print Round Robin — управление печатью")
-        self.root.geometry("1240x820")
-        self.root.minsize(1000, 680)
+        self.root.geometry("1600x900")
+        self.root.minsize(1280, 800)
+        try:
+            self.root.state("zoomed")
+        except tk.TclError:
+            pass
         self.events: queue.Queue = queue.Queue()
         self.log_events: queue.Queue = queue.Queue()
         self.logger = configure_logging(self.log_events)
@@ -140,6 +145,8 @@ class PrintRoundRobinApp:
             self.config = AppConfig()
             self.store.save(self.config)
 
+        self.theme_manager = ThemeManager(self.root, self.config.theme)
+        self.printer_cards: dict[str, dict] = {}
         self.engine: RoundRobinEngine | None = None
         self.engine_starting = False
         self.admin_result_path: Path | None = None
@@ -164,19 +171,7 @@ class PrintRoundRobinApp:
             self.root.after(1000, self.start_engine)
 
     def _build_style(self):
-        style = ttk.Style(self.root)
-        try:
-            style.theme_use("vista")
-        except tk.TclError:
-            try:
-                style.theme_use("clam")
-            except tk.TclError:
-                pass
-        style.configure("Title.TLabel", font=("Segoe UI", 15, "bold"))
-        style.configure("Metric.TLabel", font=("Segoe UI", 19, "bold"))
-        style.configure("Treeview", rowheight=25)
-        style.configure("Treeview.Heading", font=("Segoe UI", 9, "bold"))
-        style.configure("Main.TButton", padding=(12, 7))
+        self.theme_manager.apply(self.config.theme)
 
     def _build_ui(self):
         outer = ttk.Frame(self.root, padding=10)
@@ -207,6 +202,9 @@ class PrintRoundRobinApp:
         ttk.Button(toolbar, text="Сохранить настройки", command=self.save_settings).pack(side="left")
         ttk.Button(toolbar, text="Импорт JSON", command=self.import_settings).pack(side="left", padx=6)
         ttk.Button(toolbar, text="Экспорт JSON", command=self.export_settings).pack(side="left")
+        self.theme_button = ttk.Button(toolbar, text="", command=self.toggle_theme)
+        self.theme_button.pack(side="right")
+        self._update_theme_button()
 
         self.tabs = ttk.Notebook(outer)
         self.tabs.pack(fill="both", expand=True)

@@ -847,6 +847,8 @@ class PrintRoundRobinApp:
             )
             self.store.save(candidate)
             self.config = candidate
+            if queue_settings_changed:
+                self._auto_queue_setup_attempted = False
             self.theme_manager.apply(candidate.theme)
             self._update_theme_button()
             self._apply_dashboard_theme()

@@ -260,9 +260,6 @@ class PrintRoundRobinApp:
 
     def _install_context_menus(self):
         self.text_context_menu = tk.Menu(self.root, tearoff=0)
-        self.text_context_menu.add_command(label="Отменить", command=lambda: self._edit_focused("<<Undo>>"))
-        self.text_context_menu.add_command(label="Повторить", command=lambda: self._edit_focused("<<Redo>>"))
-        self.text_context_menu.add_separator()
         self.text_context_menu.add_command(label="Вырезать", command=lambda: self._edit_focused("<<Cut>>"))
         self.text_context_menu.add_command(label="Копировать", command=lambda: self._edit_focused("<<Copy>>"))
         self.text_context_menu.add_command(label="Вставить", command=lambda: self._edit_focused("<<Paste>>"))
@@ -360,12 +357,12 @@ class PrintRoundRobinApp:
         # across Russian/English layouts; keysyms cover other Tk platforms.
         physical = {
             65: "a", 67: "c", 86: "v", 88: "x",
-            89: "y", 90: "z", 45: "insert", 46: "delete",
+            45: "insert", 46: "delete",
         }
         key = physical.get(keycode, keysym)
         layout_aliases = {
             "cyrillic_ef": "a", "cyrillic_es": "c", "cyrillic_em": "v",
-            "cyrillic_che": "x", "cyrillic_en": "y", "cyrillic_ya": "z",
+            "cyrillic_che": "x",
         }
         key = layout_aliases.get(key, key)
 
@@ -373,15 +370,15 @@ class PrintRoundRobinApp:
         if control:
             if key == "a":
                 action = "select"
-            elif key in ("c", "v", "x", "z", "y", "insert"):
+            elif key in ("c", "v", "x", "insert"):
                 # Standard Latin shortcuts are already handled by Tk's
                 # Entry/Text class bindings. Do not execute them a second
                 # time (a duplicate Paste would insert the clipboard twice).
-                if keysym in ("c", "v", "x", "z", "y", "insert"):
+                if keysym in ("c", "v", "x", "insert"):
                     return None
                 action = {
                     "c": "<<Copy>>", "v": "<<Paste>>", "x": "<<Cut>>",
-                    "z": "<<Undo>>", "y": "<<Redo>>", "insert": "<<Copy>>",
+                    "insert": "<<Copy>>",
                 }.get(key)
         elif shift and key in ("insert", "delete"):
             # In the normal Latin layout Tk handles these bindings itself.

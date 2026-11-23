@@ -20,7 +20,7 @@ def test_oid_encoder_round_trips_standard_printer_mib_oid():
 
 def test_hr_printer_error_bits_are_decoded_most_significant_first():
     # Bit 0 = lowPaper, bit 2 = lowToner, bit 5 = jammed, bit 13 = inputTrayEmpty.
-    result = decode_error_bits(bytes((0b10000100, 0b00100000)))
+    result = decode_error_bits(bytes((0b10100100, 0b00000100)))
     assert [item["text"] for item in result] == [
         "Мало бумаги",
         "Мало тонера",

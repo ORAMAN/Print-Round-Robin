@@ -1,6 +1,6 @@
 import pytest
 
-from print_round_robin.config import AppConfig, ConfigStore, PrinterConfig
+from print_round_robin.config import AppConfig, ConfigStore, PrinterConfig, reorder_printers
 
 
 def test_default_config_has_ten_printers_and_is_valid():
@@ -42,3 +42,50 @@ def test_invalid_config_file_is_backed_up(tmp_path):
     with pytest.raises(ValueError):
         store.load()
     assert path.with_suffix(".json.broken").exists()
+
+
+def test_selected_printers_move_up_together_and_keep_relative_order():
+    printers = [
+        PrinterConfig("A", "192.0.2.1"),
+        PrinterConfig("B", "192.0.2.2"),
+        PrinterConfig("C", "192.0.2.3"),
+        PrinterConfig("D", "192.0.2.4"),
+        PrinterConfig("E", "192.0.2.5"),
+    ]
+
+    reordered = reorder_printers(printers, {"192.0.2.2", "192.0.2.4"}, -1)
+
+    assert [printer.name for printer in reordered] == ["B", "A", "D", "C", "E"]
+    assert [printer.name for printer in printers] == ["A", "B", "C", "D", "E"]
+
+
+def test_selected_printers_move_down_together_and_keep_relative_order():
+    printers = [
+        PrinterConfig("A", "192.0.2.1"),
+        PrinterConfig("B", "192.0.2.2"),
+        PrinterConfig("C", "192.0.2.3"),
+        PrinterConfig("D", "192.0.2.4"),
+        PrinterConfig("E", "192.0.2.5"),
+    ]
+
+    reordered = reorder_printers(printers, {"192.0.2.2", "192.0.2.4"}, 1)
+
+    assert [printer.name for printer in reordered] == ["A", "C", "B", "E", "D"]
+
+
+def test_selected_contiguous_printer_group_moves_as_a_block():
+    printers = [
+        PrinterConfig("A", "192.0.2.1"),
+        PrinterConfig("B", "192.0.2.2"),
+        PrinterConfig("C", "192.0.2.3"),
+        PrinterConfig("D", "192.0.2.4"),
+    ]
+
+    reordered = reorder_printers(printers, {"192.0.2.2", "192.0.2.3"}, -1)
+
+    assert [printer.name for printer in reordered] == ["B", "C", "A", "D"]
+
+
+def test_reorder_rejects_invalid_direction():
+    with pytest.raises(ValueError, match="Направление"):
+        reorder_printers([PrinterConfig("A", "192.0.2.1")], {"192.0.2.1"}, 0)

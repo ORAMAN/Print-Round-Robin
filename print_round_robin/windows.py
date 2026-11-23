@@ -185,7 +185,7 @@ def setup_virtual_printer(config: AppConfig) -> str:
     if config.share_enabled:
         share_setup = (
             f"if($null -eq $printer){{Add-Printer -Name {q} -DriverName {d} -PortName {p} "
-            f"-Shared $true -ShareName {_ps_quote(config.share_name)}}} "
+            f"-Shared -ShareName {_ps_quote(config.share_name)}}} "
             f"else{{Set-Printer -Name {q} -DriverName {d} -PortName {p} "
             f"-Shared $true -ShareName {_ps_quote(config.share_name)}}}"
         )

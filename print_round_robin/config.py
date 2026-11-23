@@ -155,6 +155,28 @@ def _bounded_float(value: Any, label: str, minimum: float, maximum: float) -> fl
     return number
 
 
+def reorder_printers(
+    printers: list[PrinterConfig], selected_hosts: set[str], direction: int
+) -> list[PrinterConfig]:
+    """Move selected printers one position up (-1) or down (+1), preserving order."""
+    if direction not in (-1, 1):
+        raise ValueError("Направление перемещения должно быть -1 или 1.")
+    ordered = list(printers)
+    selected = set(selected_hosts)
+    if not selected:
+        return ordered
+
+    if direction < 0:
+        for index in range(1, len(ordered)):
+            if ordered[index].host in selected and ordered[index - 1].host not in selected:
+                ordered[index - 1], ordered[index] = ordered[index], ordered[index - 1]
+    else:
+        for index in range(len(ordered) - 2, -1, -1):
+            if ordered[index].host in selected and ordered[index + 1].host not in selected:
+                ordered[index], ordered[index + 1] = ordered[index + 1], ordered[index]
+    return ordered
+
+
 class ConfigStore:
     def __init__(self, path: Path | None = None):
         self.path = path or (app_data_dir() / "settings.json")

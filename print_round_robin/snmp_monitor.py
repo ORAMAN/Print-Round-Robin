@@ -241,8 +241,14 @@ class SnmpClient:
 
 
 # Host Resources MIB, RFC 2790.
+HR_DEVICE_DESCRIPTION = "1.3.6.1.2.1.25.3.2.1.3"
+HR_DEVICE_STATUS = "1.3.6.1.2.1.25.3.2.1.5"
 HR_PRINTER_STATUS = "1.3.6.1.2.1.25.3.5.1.1"
 HR_PRINTER_ERRORS = "1.3.6.1.2.1.25.3.5.1.2"
+SYS_NAME = "1.3.6.1.2.1.1.5.0"
+# Printer-MIB fields also queried by the user's working OLEPRN/VBA code.
+PRT_GENERAL_SERIAL_NUMBER = "1.3.6.1.2.1.43.5.1.1.17"
+PRT_CONSOLE_DISPLAY_TEXT = "1.3.6.1.2.1.43.16.5.1.2"
 # Printer-MIB, RFC 3805.
 PRT_SUPPLY_DESCRIPTION = "1.3.6.1.2.1.43.11.1.1.6"
 PRT_SUPPLY_CAPACITY = "1.3.6.1.2.1.43.11.1.1.8"
@@ -291,11 +297,11 @@ def _index_from_oid(oid: str, base: str) -> str:
 
 
 def _poll_supply_data(client: SnmpClient) -> list[dict]:
-    descriptions = client.walk(PRT_SUPPLY_DESCRIPTION, max_rows=40)
+    descriptions = _safe_walk(client, PRT_SUPPLY_DESCRIPTION, max_rows=40)
     capacities = { _index_from_oid(v.oid, PRT_SUPPLY_CAPACITY): v.value
-                   for v in client.walk(PRT_SUPPLY_CAPACITY, max_rows=40) }
+                   for v in _safe_walk(client, PRT_SUPPLY_CAPACITY, max_rows=40) }
     levels = { _index_from_oid(v.oid, PRT_SUPPLY_LEVEL): v.value
-               for v in client.walk(PRT_SUPPLY_LEVEL, max_rows=40) }
+               for v in _safe_walk(client, PRT_SUPPLY_LEVEL, max_rows=40) }
     supplies = []
     for item in descriptions:
         suffix = _index_from_oid(item.oid, PRT_SUPPLY_DESCRIPTION)
@@ -311,9 +317,9 @@ def _poll_supply_data(client: SnmpClient) -> list[dict]:
 
 
 def _poll_alerts(client: SnmpClient) -> list[dict]:
-    descriptions = client.walk(PRT_ALERT_DESCRIPTION, max_rows=60)
+    descriptions = _safe_walk(client, PRT_ALERT_DESCRIPTION, max_rows=60)
     severities = { _index_from_oid(v.oid, PRT_ALERT_SEVERITY): v.value
-                   for v in client.walk(PRT_ALERT_SEVERITY, max_rows=60) }
+                   for v in _safe_walk(client, PRT_ALERT_SEVERITY, max_rows=60) }
     alerts = []
     for item in descriptions:
         description = _text(item.value)
@@ -327,29 +333,96 @@ def _poll_alerts(client: SnmpClient) -> list[dict]:
     return alerts
 
 
+def _safe_get(client: SnmpClient, oid: str) -> VarBind | None:
+    """An unsupported optional MIB object must not make the whole printer unavailable."""
+    try:
+        return client.get(oid)
+    except SnmpError:
+        return None
+
+
+def _safe_walk(client: SnmpClient, oid: str, max_rows: int) -> list[VarBind]:
+    try:
+        return client.walk(oid, max_rows=max_rows)
+    except SnmpError:
+        return []
+
+
+def _discover_printer_identity(client: SnmpClient) -> tuple[VarBind | None, str]:
+    """Use the same hrDeviceDescr OID as OLEPRN VBA, then standard sysName as fallback."""
+    candidates = (f"{HR_DEVICE_DESCRIPTION}.1", SYS_NAME)
+    for oid in candidates:
+        try:
+            item = client.get(oid)
+        except SnmpError:
+            item = None
+        if item is not None and _text(item.value):
+            return item, oid
+
+    # Some devices expose hrDeviceDescr but use an index other than 1.
+    for item in _safe_walk(client, HR_DEVICE_DESCRIPTION, max_rows=20):
+        if _text(item.value):
+            return item, item.oid
+    return None, ""
+
+
+def _make_client_for_printer(host: str, community: str, port: int,
+                             timeout: float, version: str) -> tuple[SnmpClient, VarBind, str]:
+    """Try the configured SNMP version first, then the other community-based version."""
+    preferred = "1" if str(version).lower() in ("1", "v1") else "2c"
+    other = "2c" if preferred == "1" else "1"
+    errors: list[str] = []
+    for candidate_version in (preferred, other):
+        client = SnmpClient(host, community, port, timeout, candidate_version)
+        identity, identity_oid = _discover_printer_identity(client)
+        if identity is not None:
+            return client, identity, identity_oid
+        errors.append(f"SNMPv{candidate_version}: не получен ответ на OID hrDeviceDescr/sysName")
+    raise SnmpError(
+        "Нет ответа на базовые SNMP-запросы hrDeviceDescr и sysName. " + "; ".join(errors)
+    )
+
+
 def poll_printer(host: str, community: str = "public", port: int = 161,
                  timeout: float = 0.8, version: str = "2c") -> dict:
-    """Return a normalized printer status or raise SnmpError if SNMP is unavailable."""
-    client = SnmpClient(host, community, port, timeout, version)
-    sys_name = client.get("1.3.6.1.2.1.1.5.0")
-    if sys_name is None:
-        raise SnmpError("SNMP-агент не вернул system.sysName.")
+    """Poll a printer; tolerate missing MIB objects and negotiate v1/v2c for its agent."""
+    client, identity, identity_oid = _make_client_for_printer(
+        host, community, port, timeout, version
+    )
 
-    status_rows = client.walk(HR_PRINTER_STATUS, max_rows=20)
     printer_index = None
     printer_status = None
-    for row in status_rows:
-        suffix = _index_from_oid(row.oid, HR_PRINTER_STATUS)
-        if suffix.isdigit():
-            printer_index = suffix
-            printer_status = row.value
-            break
+    # The VBA sample reads hrPrinterStatus.1 directly. Try that exact instance first.
+    status = _safe_get(client, f"{HR_PRINTER_STATUS}.1")
+    if status is not None and isinstance(status.value, int):
+        printer_index = "1"
+        printer_status = status.value
+    else:
+        for row in _safe_walk(client, HR_PRINTER_STATUS, max_rows=20):
+            suffix = _index_from_oid(row.oid, HR_PRINTER_STATUS)
+            if suffix.isdigit():
+                printer_index = suffix
+                printer_status = row.value
+                break
 
     errors: list[dict[str, str]] = []
     if printer_index:
-        error = client.get(f"{HR_PRINTER_ERRORS}.{printer_index}")
+        error = _safe_get(client, f"{HR_PRINTER_ERRORS}.{printer_index}")
         if error and isinstance(error.value, bytes):
             errors = decode_error_bits(error.value)
+
+    # hrDeviceStatus is the warning/status value read by the VBA workbook.
+    device_status_item = _safe_get(client, f"{HR_DEVICE_STATUS}.1")
+    device_status = device_status_item.value if device_status_item else None
+    if device_status == 3:
+        errors.append({"text": "Устройство сообщает состояние WARNING (hrDeviceStatus=3)", "severity": "warning"})
+    elif device_status == 5:
+        errors.append({"text": "Устройство сообщает состояние DOWN (hrDeviceStatus=5)", "severity": "critical"})
+
+    console_item = _safe_get(client, f"{PRT_CONSOLE_DISPLAY_TEXT}.1.1")
+    console_message = _text(console_item.value) if console_item and console_item.value is not None else ""
+    serial_item = _safe_get(client, f"{PRT_GENERAL_SERIAL_NUMBER}.1")
+    serial_number = _text(serial_item.value) if serial_item and serial_item.value is not None else ""
 
     alerts = _poll_alerts(client)
     # Alerts provide detailed device-specific wording; de-duplicate against Host MIB bits.
@@ -371,6 +444,7 @@ def poll_printer(host: str, community: str = "public", port: int = 161,
     for item in supply_warning:
         if item["text"] not in seen:
             errors.append(item)
+            seen.add(item["text"])
 
     critical = any(item["severity"] == "critical" for item in errors)
     warning = any(item["severity"] == "warning" for item in errors)
@@ -392,17 +466,25 @@ def poll_printer(host: str, community: str = "public", port: int = 161,
         f"{s['name']}: {s['percent']}%" for s in supplies
         if s["percent"] is not None and any(k in s["name"].casefold() for k in ("toner", "тонер"))
     ]
+    name = _text(identity.value)
+    if serial_number and serial_number.casefold() not in name.casefold():
+        name = f"{name}\n{serial_number}"
     return {
         "reachable": True,
-        "name": _text(sys_name.value),
+        "name": name,
+        "identity_oid": identity_oid,
         "state": state,
         "state_text": state_names.get(printer_status, "Состояние неизвестно"),
         "printer_status": printer_status,
+        "device_status": device_status,
+        "status_message": console_message,
+        "serial_number": serial_number,
         "printer_index": printer_index,
         "errors": errors,
         "alerts": alerts,
         "supplies": supplies,
         "toner_text": ", ".join(toner_values) if toner_values else "Уровень тонера не сообщается",
+        "snmp_version_used": "1" if client.version == 0 else "2c",
         "polled_at": time.time(),
         "source": "SNMP Printer-MIB / Host Resources MIB",
     }

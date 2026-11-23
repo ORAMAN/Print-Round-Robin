@@ -223,10 +223,11 @@ def write_client_installer(destination: Path, server_name: str, share_name: str)
     destination = Path(destination)
     server_name = str(server_name).strip()
     share_name = str(share_name).strip()
-    invalid = '\\/:*?"<>|'
-    if not server_name or any(ch in server_name for ch in invalid):
-        raise WindowsIntegrationError("Укажите корректное имя сервера или IPv4-адрес.")
-    if not share_name or len(share_name) > 80 or any(ch in share_name for ch in invalid):
+    if not server_name or any(not (ch.isalnum() or ch in ".-_") for ch in server_name):
+        raise WindowsIntegrationError("Имя сервера должно содержать только буквы, цифры, точку, дефис или подчёркивание.")
+    if (not share_name or len(share_name) > 80
+            or any(not (ch.isalnum() or ch in " _-.") for ch in share_name)
+            or share_name.endswith((".", " "))):
         raise WindowsIntegrationError("Укажите корректное имя сетевого ресурса принтера.")
     printer_path = f"\\\\{server_name}\\{share_name}"
     lines = [

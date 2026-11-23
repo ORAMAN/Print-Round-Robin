@@ -85,12 +85,12 @@ class AppConfig:
         self.share_enabled = bool(self.share_enabled)
         self.share_name = str(self.share_name).strip()
         self.share_server = str(self.share_server).strip()
-        if len(self.share_name) > 80 or any(
-            not (ch.isalnum() or ch in " _-.") for ch in self.share_name
+        if len(self.share_name) > 31 or any(
+            not (ch.isalnum() or ch in "_-.") for ch in self.share_name
         ):
-            raise ValueError("Имя сетевого ресурса принтера содержит недопустимые символы или длиннее 80 знаков.")
+            raise ValueError("Имя сетевого ресурса принтера должно содержать не более 31 символа: буквы, цифры, точка, дефис или подчёркивание.")
         if self.share_name.endswith((".", " ")):
-            raise ValueError("Имя сетевого ресурса принтера не должно заканчиваться точкой или пробелом.")
+            raise ValueError("Имя сетевого ресурса принтера не должно заканчиваться точкой.")
         if self.share_enabled and not self.share_name:
             raise ValueError("Укажите имя сетевого ресурса для публикации принтера.")
         if any(not (ch.isalnum() or ch in ".-_") for ch in self.share_server):

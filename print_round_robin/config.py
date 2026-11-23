@@ -48,6 +48,10 @@ class AppConfig:
     queue_name: str = "Kyocera Round Robin"
     port_name: str = "KYOCERA_RR_LOCAL"
     driver_name: str = ""
+    auto_manage_queue: bool = True
+    share_enabled: bool = False
+    share_name: str = "KyoceraRoundRobin"
+    share_server: str = ""
     listener_host: str = "127.0.0.1"
     listener_port: int = 9100
     default_printer_port: int = 9100
@@ -77,6 +81,19 @@ class AppConfig:
         self.queue_name = str(self.queue_name).strip()
         self.port_name = str(self.port_name).strip()
         self.driver_name = str(self.driver_name).strip()
+        self.auto_manage_queue = bool(self.auto_manage_queue)
+        self.share_enabled = bool(self.share_enabled)
+        self.share_name = str(self.share_name).strip()
+        self.share_server = str(self.share_server).strip()
+        invalid_share_chars = '\\/:*?"<>|'
+        if len(self.share_name) > 80 or any(ch in self.share_name for ch in invalid_share_chars):
+            raise ValueError("Имя сетевого ресурса принтера содержит недопустимые символы или длиннее 80 знаков.")
+        if self.share_name.endswith((".", " ")):
+            raise ValueError("Имя сетевого ресурса принтера не должно заканчиваться точкой или пробелом.")
+        if self.share_enabled and not self.share_name:
+            raise ValueError("Укажите имя сетевого ресурса для публикации принтера.")
+        if any(ch in self.share_server for ch in '\\/:*?"<>|'):
+            raise ValueError("Имя сервера должно быть именем компьютера, DNS-именем или IPv4-адресом без обратных слешей.")
         if not self.queue_name:
             raise ValueError("Не задано имя виртуального принтера.")
         if not self.port_name:

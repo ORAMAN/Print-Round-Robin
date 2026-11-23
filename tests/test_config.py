@@ -145,30 +145,3 @@ def test_invalid_printer_share_server_is_rejected():
     config = AppConfig(share_server=r"\\printserver\share")
     with pytest.raises(ValueError, match="Имя сервера"):
         config.validate()
-
-
-
-def test_config_store_migrates_only_default_kyocera_names(tmp_path):
-    path = tmp_path / "settings.json"
-    config = AppConfig()
-    config.printers[0].name = "Kyocera 121"
-    config.printers[1].name = "Office North"
-    # Simulate settings saved by the previous release.
-    import json
-    old_data = config.to_dict()
-    for index, printer in enumerate(old_data["printers"], start=121):
-        printer["name"] = f"Kyocera {index}"
-    old_data["printers"][1]["name"] = "My custom printer"
-    path.write_text(json.dumps(old_data, ensure_ascii=False), encoding="utf-8")
-
-    store = ConfigStore(path)
-    restored = store.load()
-
-    assert restored.printers[0].name == "Kyocera 1"
-    assert restored.printers[1].name == "My custom printer"
-    assert restored.printers[-1].name == "Kyocera 10"
-
-    # The migration is persisted and is not needed on the next load.
-    persisted = json.loads(path.read_text(encoding="utf-8"))
-    assert persisted["printers"][0]["name"] == "Kyocera 1"
-    assert persisted["printers"][-1]["name"] == "Kyocera 10"

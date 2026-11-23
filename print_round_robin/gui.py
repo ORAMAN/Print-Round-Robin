@@ -491,23 +491,19 @@ class PrintRoundRobinApp:
 
         split = ttk.Panedwindow(self.monitor_tab, orient="vertical")
         split.pack(fill="both", expand=True)
-        printer_box = ttk.LabelFrame(split, text="Состояние физических принтеров  •  10 устройств", padding=5)
+        self.printer_box = ttk.LabelFrame(split, text="Состояние физических принтеров", padding=5)
         job_box = ttk.LabelFrame(split, text="Задания печати", padding=6)
-        split.add(printer_box, weight=2)
+        split.add(self.printer_box, weight=2)
         split.add(job_box, weight=1)
 
         self.printer_grid = tk.Frame(
-            printer_box, bg=self.theme_manager.palette["panel"], bd=0, highlightthickness=0
+            self.printer_box, bg=self.theme_manager.palette["panel"], bd=0, highlightthickness=0
         )
         self.printer_grid.pack(fill="both", expand=True)
-        for col in range(5):
-            self.printer_grid.grid_columnconfigure(col, weight=1, uniform="printer-card")
-        for row in range(2):
-            self.printer_grid.grid_rowconfigure(row, weight=1, uniform="printer-row")
-
         self.printer_cards = {}
-        for index, printer in enumerate(self.config.printers[:10]):
-            self._create_printer_card(printer, index)
+        self.printer_grid_columns = 1
+        self.printer_grid_rows = 0
+        self._rebuild_printer_cards()
 
         self.job_tree = self._tree(
             job_box,
@@ -530,8 +526,9 @@ class PrintRoundRobinApp:
             padx=9,
             pady=7,
         )
+        columns = max(1, int(getattr(self, "printer_grid_columns", 1)))
         frame.grid(
-            row=index // 5, column=index % 5, sticky="nsew",
+            row=index // columns, column=index % columns, sticky="nsew",
             padx=4, pady=4,
         )
         header = tk.Frame(frame, bg=state_palette["bg"])
@@ -1382,15 +1379,47 @@ class PrintRoundRobinApp:
         for child in self.printer_grid.winfo_children():
             child.destroy()
         self.printer_cards = {}
+
+        # The monitor represents only printers that participate in Round Robin.
+        # Inactive devices remain available on the Printers tab for later re-enable.
+        active_printers = [printer for printer in self.config.printers if printer.enabled]
+        active_count = len(active_printers)
+        columns = min(5, active_count) if active_count else 1
+        rows = (active_count + columns - 1) // columns if active_count else 0
+        self.printer_grid_columns = columns
+
         for col in range(5):
-            self.printer_grid.grid_columnconfigure(col, weight=1, uniform="printer-card")
-        for row in range(2):
-            self.printer_grid.grid_rowconfigure(row, weight=1, uniform="printer-row")
-        for index, printer in enumerate(self.config.printers[:10]):
-            self._create_printer_card(printer, index)
-        if len(self.config.printers) > 10:
-            self.logger.warning("В интерфейсе отображаются первые 10 принтеров; остальные не помещаются в панель 5×2.")
-        self._update_printer_status(list(getattr(self, "_latest_printer_rows", {}).values()))
+            self.printer_grid.grid_columnconfigure(col, weight=1 if col < columns else 0,
+                                                   uniform="printer-card" if col < columns else "")
+        for row in range(max(2, self.printer_grid_rows, rows)):
+            self.printer_grid.grid_rowconfigure(row, weight=1 if row < rows else 0,
+                                                uniform="printer-row" if row < rows else "")
+        self.printer_grid_rows = rows
+
+        if hasattr(self, "printer_box"):
+            total = len(self.config.printers)
+            self.printer_box.configure(
+                text=f"Состояние физических принтеров  •  участвуют: {active_count} из {total}"
+            )
+
+        if not active_printers:
+            ttk.Label(
+                self.printer_grid,
+                text="Нет принтеров, участвующих в распределении.\\n"
+                     "Включите устройства на вкладке «Принтеры».",
+                style="Muted.TLabel",
+                justify="center",
+            ).grid(row=0, column=0, sticky="nsew", padx=12, pady=20)
+        else:
+            for index, printer in enumerate(active_printers):
+                self._create_printer_card(printer, index)
+
+        active_hosts = {printer.host for printer in active_printers}
+        latest_rows = getattr(self, "_latest_printer_rows", {})
+        self._latest_printer_rows = {
+            host: row for host, row in latest_rows.items() if host in active_hosts
+        }
+        self._update_printer_status(list(self._latest_printer_rows.values()))
 
     def _update_theme_button(self) -> None:
         if hasattr(self, "theme_button"):

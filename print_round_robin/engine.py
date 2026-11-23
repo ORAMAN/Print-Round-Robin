@@ -27,6 +27,7 @@ class JobInfo:
     filename: str
     status: str
     size: int = 0
+    bytes_sent: int = 0
     received_at: float = field(default_factory=time.time)
     printer: str = ""
     started_at: float | None = None
@@ -35,15 +36,10 @@ class JobInfo:
 
     def as_dict(self) -> dict:
         return {
-            "job_id": self.job_id,
-            "filename": self.filename,
-            "status": self.status,
-            "size": self.size,
-            "received_at": self.received_at,
-            "printer": self.printer,
-            "started_at": self.started_at,
-            "finished_at": self.finished_at,
-            "error": self.error,
+            "job_id": self.job_id, "filename": self.filename, "status": self.status,
+            "size": self.size, "bytes_sent": self.bytes_sent, "received_at": self.received_at,
+            "printer": self.printer, "started_at": self.started_at,
+            "finished_at": self.finished_at, "error": self.error,
         }
 
 
@@ -59,11 +55,11 @@ class PrinterRuntime:
 
 
 class RoundRobinEngine:
-    """Receives each Windows RAW job to disk, then forwards jobs concurrently.
+    """Receive each Windows RAW job to disk, then forward jobs concurrently.
 
-    A physical printer is protected by its own lock, so two independent jobs
-    can never be interleaved on one printer. Different printers work in
-    parallel. A complete job is the distribution unit (not individual pages).
+    A complete document is the distribution unit. A per-printer lock prevents
+    concurrent writes to the same device, while different printers can work
+    in parallel.
     """
 
     def __init__(self, config: AppConfig, event_callback: Callable[[dict], None] | None = None):
@@ -89,9 +85,7 @@ class RoundRobinEngine:
         self._state_lock = threading.Lock()
         self._jobs_lock = threading.Lock()
         self._next_index = self._load_next_index()
-        self._printer_runtime = {
-            p.host: PrinterRuntime(p) for p in config.printers if p.enabled
-        }
+        self._printer_runtime = {p.host: PrinterRuntime(p) for p in config.printers if p.enabled}
         self._printer_locks = {p.host: threading.Lock() for p in config.printers if p.enabled}
         self._jobs: OrderedDict[str, JobInfo] = OrderedDict()
         self._counters = {"received": 0, "completed": 0, "failed": 0}
@@ -109,11 +103,12 @@ class RoundRobinEngine:
             LOG.exception("Ошибка обработчика события интерфейса")
 
     def _load_next_index(self) -> int:
+        count = max(1, len([p for p in self.config.printers if p.enabled]))
         try:
             raw = json.loads(self.state_file.read_text(encoding="utf-8"))
-            return int(raw.get("next_index", 0)) % max(1, len([p for p in self.config.printers if p.enabled]))
+            return int(raw.get("next_index", 0)) % count
         except (OSError, ValueError, TypeError, json.JSONDecodeError):
-            return load_legacy_next_index() % max(1, len([p for p in self.config.printers if p.enabled]))
+            return load_legacy_next_index() % count
 
     def _save_next_index(self) -> None:
         self.base_dir.mkdir(parents=True, exist_ok=True)
@@ -136,8 +131,6 @@ class RoundRobinEngine:
             self._workers_queue = queue.Queue()
             self._receiver_slots = threading.BoundedSemaphore(self.config.max_receivers)
             self._worker_threads = []
-
-            # Recover completed staged jobs from a previous clean/unclean exit.
             self._migrate_legacy_spool()
             self._recover_spool()
 
@@ -151,13 +144,20 @@ class RoundRobinEngine:
                 server.close()
                 raise
             self._server = server
-            for index in range(min(self.config.max_workers, len(self._printer_runtime))):
-                worker = threading.Thread(target=self._worker_loop, name=f"PrintWorker-{index + 1}", daemon=True)
+            worker_count = min(self.config.max_workers, len(self._printer_runtime))
+            for index in range(worker_count):
+                worker = threading.Thread(
+                    target=self._worker_loop, name=f"PrintWorker-{index + 1}", daemon=True
+                )
                 worker.start()
                 self._worker_threads.append(worker)
             self._started = True
-            self._accept_thread = threading.Thread(target=self._accept_loop, name="PrintRelay-Accept", daemon=True)
-            self._health_thread = threading.Thread(target=self._health_loop, name="PrintRelay-Health", daemon=True)
+            self._accept_thread = threading.Thread(
+                target=self._accept_loop, name="PrintRelay-Accept", daemon=True
+            )
+            self._health_thread = threading.Thread(
+                target=self._health_loop, name="PrintRelay-Health", daemon=True
+            )
             self._accept_thread.start()
             self._health_thread.start()
             LOG.info(
@@ -215,10 +215,8 @@ class RoundRobinEngine:
                 client.close()
                 continue
             thread = threading.Thread(
-                target=self._receive_job,
-                args=(client, address),
-                name=f"PrintReceiver-{address[0]}",
-                daemon=True,
+                target=self._receive_job, args=(client, address),
+                name=f"PrintReceiver-{address[0]}", daemon=True,
             )
             with self._receiver_lock:
                 self._receivers.add(thread)
@@ -245,10 +243,9 @@ class RoundRobinEngine:
                     os.fsync(output.fileno())
             if size == 0:
                 partial_path.unlink(missing_ok=True)
-                return  # Windows port-monitor probe; not a print job.
+                return  # Standard TCP/IP port-monitor probe.
             if not reached_eof:
-                target = self.failed_dir / partial_path.name
-                os.replace(partial_path, target)
+                os.replace(partial_path, self.failed_dir / partial_path.name)
                 LOG.warning("Неполное задание %s перемещено для ручной проверки", job_id)
                 return
             os.replace(partial_path, staged_path)
@@ -265,14 +262,13 @@ class RoundRobinEngine:
             if partial_path.exists():
                 try:
                     if partial_path.stat().st_size:
-                        target = self.failed_dir / partial_path.name
-                        os.replace(partial_path, target)
+                        os.replace(partial_path, self.failed_dir / partial_path.name)
                     else:
                         partial_path.unlink(missing_ok=True)
                 except OSError:
                     LOG.exception("Не удалось обработать частичный файл %s", partial_path)
             if not self._stop.is_set():
-                LOG.exception("Ошибка приёма задания от %s:%s: %s", *address, exc)
+                LOG.error("Ошибка приёма задания от %s:%s: %s", *address, exc)
         finally:
             try:
                 client.close()
@@ -291,19 +287,16 @@ class RoundRobinEngine:
             except queue.Empty:
                 continue
             try:
-                if self._stop.is_set():
-                    continue
-                self._forward_job(path, job_id)
+                if not self._stop.is_set():
+                    self._forward_job(path, job_id)
             finally:
                 self._workers_queue.task_done()
 
     def _reserve_printer(self) -> tuple[PrinterConfig, socket.socket, threading.Lock] | None:
         printers = [p for p in self.config.printers if p.enabled]
-        if not printers:
-            return None
-        while not self._stop.is_set():
+        while printers and not self._stop.is_set():
             connection_failures = 0
-            acquired_busy = False
+            saw_busy_printer = False
             with self._scheduler_lock:
                 count = len(printers)
                 start = self._next_index % count
@@ -312,7 +305,7 @@ class RoundRobinEngine:
                     printer = printers[index]
                     lock = self._printer_locks[printer.host]
                     if not lock.acquire(blocking=False):
-                        acquired_busy = True
+                        saw_busy_printer = True
                         continue
                     try:
                         sock = socket.create_connection(
@@ -340,24 +333,24 @@ class RoundRobinEngine:
                     runtime.busy = True
                     self._emit_printer_status()
                     return printer, sock, lock
-            if self._stop.wait(self.config.busy_retry_delay if acquired_busy and not connection_failures
-                               else self.config.retry_delay):
-                return None
+            delay = self.config.busy_retry_delay if saw_busy_printer and not connection_failures else self.config.retry_delay
+            if self._stop.wait(delay):
+                break
         return None
 
     def _forward_job(self, source_path: Path, job_id: str) -> None:
         printer: PrinterConfig | None = None
         printer_socket: socket.socket | None = None
         printer_lock: threading.Lock | None = None
-        staged_sending = source_path.with_suffix(".sending")
+        sending_path = source_path.with_suffix(".sending")
         bytes_sent = 0
-        transmission_started = False
         started = time.monotonic()
         try:
-            printer, printer_socket, printer_lock = self._reserve_printer() or (None, None, None)
-            if printer is None or printer_socket is None:
+            reservation = self._reserve_printer()
+            if reservation is None:
                 return
-            os.replace(source_path, staged_sending)
+            printer, printer_socket, printer_lock = reservation
+            os.replace(source_path, sending_path)
             with self._jobs_lock:
                 job = self._jobs.get(job_id)
                 if job:
@@ -368,20 +361,36 @@ class RoundRobinEngine:
             self._emit("job", job=self._jobs[job_id].as_dict() if job_id in self._jobs else {})
 
             with printer_socket:
-                with staged_sending.open("rb") as source:
+                with sending_path.open("rb") as source:
                     while True:
                         if self._stop.is_set():
                             raise OSError("Ретранслятор остановлен во время передачи")
                         chunk = source.read(self.config.receive_buffer_size)
                         if not chunk:
                             break
-                        transmission_started = True
-                        printer_socket.sendall(chunk)
-                        bytes_sent += len(chunk)
+                        view = memoryview(chunk)
+                        while view:
+                            # send() returns the amount accepted by the local TCP stack.
+                            # A failure before the first accepted byte is safe to retry.
+                            sent_now = printer_socket.send(view)
+                            if sent_now <= 0:
+                                raise OSError("TCP-соединение закрыто во время передачи")
+                            bytes_sent += sent_now
+                            view = view[sent_now:]
+                        with self._jobs_lock:
+                            job = self._jobs.get(job_id)
+                            if job:
+                                job.bytes_sent = bytes_sent
+                                progress = job.as_dict()
+                            else:
+                                progress = None
+                        if progress:
+                            self._emit("job_progress", job=progress)
                 try:
                     printer_socket.shutdown(socket.SHUT_WR)
                 except OSError:
                     pass
+
             elapsed = time.monotonic() - started
             self._printer_runtime[printer.host].jobs_sent += 1
             with self._jobs_lock:
@@ -390,29 +399,38 @@ class RoundRobinEngine:
                     job.status = "Передано"
                     job.finished_at = time.time()
                 self._counters["completed"] += 1
-            staged_sending.unlink(missing_ok=True)
-            LOG.info("Задание %s передано на %s:%d; %.0f байт; %.2f с",
-                     job_id, printer.host, printer.port, bytes_sent, elapsed)
+            sending_path.unlink(missing_ok=True)
+            LOG.info(
+                "Задание %s передано на %s:%d; %.0f байт; %.2f с",
+                job_id, printer.host, printer.port, bytes_sent, elapsed,
+            )
             self._emit("job_done", job_id=job_id, printer=printer.host, bytes=bytes_sent, elapsed=elapsed)
         except OSError as exc:
-            if transmission_started:
-                self._archive_failed(staged_sending, job_id, f"Передача на {printer.host if printer else '?'} прервана: {exc}")
-            elif staged_sending.exists():
-                # No bytes reached the printer: this staged job can safely be retried.
+            if bytes_sent > 0:
+                self._archive_failed(
+                    sending_path, job_id,
+                    f"Передача на {printer.host if printer else '?'} прервана после {bytes_sent} байт: {exc}",
+                )
+            elif sending_path.exists():
                 try:
-                    os.replace(staged_sending, source_path)
+                    os.replace(sending_path, source_path)
                     with self._jobs_lock:
                         job = self._jobs.get(job_id)
                         if job:
                             job.status = "В очереди"
                             job.printer = ""
-                    self._emit("job", job=self._jobs[job_id].as_dict() if job_id in self._jobs else {})
+                            job.bytes_sent = 0
+                            progress = job.as_dict()
+                        else:
+                            progress = None
+                    if progress:
+                        self._emit("job", job=progress)
                 except OSError:
-                    self._archive_failed(staged_sending, job_id, f"Не удалось вернуть задание в очередь: {exc}")
+                    self._archive_failed(sending_path, job_id, f"Не удалось вернуть задание в очередь: {exc}")
             if not self._stop.is_set():
                 LOG.error("Ошибка задания %s: %s", job_id, exc)
         except Exception as exc:
-            self._archive_failed(staged_sending, job_id, f"Непредвиденная ошибка: {exc}")
+            self._archive_failed(sending_path, job_id, f"Непредвиденная ошибка: {exc}")
             LOG.exception("Непредвиденная ошибка обработки задания %s", job_id)
         finally:
             if printer_socket:
@@ -449,29 +467,26 @@ class RoundRobinEngine:
 
     def _recover_spool(self) -> None:
         for path in sorted(self.spool_dir.glob("*.prn")):
-            job_id = path.stem
             try:
                 size = path.stat().st_size
             except OSError:
                 size = 0
-            info = JobInfo(job_id, path.name, "В очереди после перезапуска", size=size)
+            job = JobInfo(path.stem, path.name, "В очереди после перезапуска", size=size)
             with self._jobs_lock:
-                self._jobs[job_id] = info
-            self._workers_queue.put((path, job_id))
+                self._jobs[job.job_id] = job
+            self._workers_queue.put((path, job.job_id))
             LOG.warning("Восстановлено ожидающее задание %s", path.name)
-        # A .sending file means a transfer may have reached the printer before
-        # the previous process exited. Never retry it automatically.
+        # A .sending document may already have reached the printer. Do not replay it.
         for path in self.spool_dir.glob("*.sending"):
-            target = self.failed_dir / path.name
             try:
+                target = self.failed_dir / path.name
                 os.replace(path, target)
-                LOG.warning("Найдено задание с неизвестным результатом передачи: %s", target)
+                LOG.warning("Неизвестный результат передачи — ручная проверка: %s", target)
             except OSError:
                 LOG.exception("Не удалось переместить незавершённое задание %s", path)
         for path in self.spool_dir.glob("*.part"):
-            target = self.failed_dir / path.name
             try:
-                os.replace(path, target)
+                os.replace(path, self.failed_dir / path.name)
             except OSError:
                 LOG.exception("Не удалось переместить частичное задание %s", path)
 
@@ -481,15 +496,14 @@ class RoundRobinEngine:
             return
         migrated_dir = old_spool / "migrated_by_print_round_robin"
         for old_file in old_spool.glob("*.prn"):
-            target = self.spool_dir / old_file.name
             try:
                 migrated_dir.mkdir(parents=True, exist_ok=True)
                 archived_source = migrated_dir / old_file.name
                 if archived_source.exists():
                     archived_source = migrated_dir / f"{uuid.uuid4().hex[:8]}_{old_file.name}"
-                # Move the old source aside first so a later launch cannot import
-                # the same document a second time after the new copy is printed.
+                # Preserve a one-time source copy so future launches cannot enqueue it again.
                 os.replace(old_file, archived_source)
+                target = self.spool_dir / old_file.name
                 try:
                     if not target.exists():
                         shutil.copy2(archived_source, target)
@@ -509,7 +523,9 @@ class RoundRobinEngine:
                 if runtime.busy:
                     continue
                 try:
-                    with socket.create_connection((printer.host, printer.port), timeout=self.config.connect_timeout):
+                    with socket.create_connection(
+                        (printer.host, printer.port), timeout=self.config.connect_timeout
+                    ):
                         runtime.available = True
                         runtime.last_error = ""
                 except OSError as exc:
@@ -520,29 +536,20 @@ class RoundRobinEngine:
             self._stop.wait(self.config.health_interval)
 
     def _emit_printer_status(self) -> None:
-        data = []
+        rows = []
         for host, runtime in self._printer_runtime.items():
-            if runtime.busy:
-                status = "Занят"
-            elif runtime.available is True:
-                status = "Доступен"
-            elif runtime.available is False:
-                status = "Недоступен"
-            else:
-                status = "Проверка..."
-            data.append({
-                "name": runtime.config.name,
-                "host": host,
-                "port": runtime.config.port,
-                "status": status,
-                "busy": runtime.busy,
-                "available": runtime.available,
-                "jobs_sent": runtime.jobs_sent,
-                "current_job": runtime.current_job,
-                "last_error": runtime.last_error,
-                "checked_at": runtime.checked_at,
+            status = (
+                "Занят" if runtime.busy else
+                "Доступен" if runtime.available is True else
+                "Недоступен" if runtime.available is False else "Проверка..."
+            )
+            rows.append({
+                "name": runtime.config.name, "host": host, "port": runtime.config.port,
+                "status": status, "busy": runtime.busy, "available": runtime.available,
+                "jobs_sent": runtime.jobs_sent, "current_job": runtime.current_job,
+                "last_error": runtime.last_error, "checked_at": runtime.checked_at,
             })
-        self._emit("printers", printers=data)
+        self._emit("printers", printers=rows)
 
     def _trim_jobs(self) -> None:
         while len(self._jobs) > 200:
@@ -555,24 +562,23 @@ class RoundRobinEngine:
         with self._jobs_lock:
             jobs = [job.as_dict() for job in list(self._jobs.values())[-100:]]
             counters = dict(self._counters)
-        queued = sum(1 for job in jobs if job["status"].startswith("В очереди"))
-        active = sum(1 for job in jobs if job["status"] == "Печатается")
         return {
             "running": self.running,
             "received": counters["received"],
             "completed": counters["completed"],
             "failed": counters["failed"],
-            "queued": queued,
-            "active": active,
+            "queued": sum(1 for job in jobs if job["status"].startswith("В очереди")),
+            "active": sum(1 for job in jobs if job["status"] == "Печатается"),
             "jobs": jobs,
             "printers": [
                 {
-                    "name": r.config.name, "host": host, "port": r.config.port,
-                    "status": "Занят" if r.busy else ("Доступен" if r.available is True else
-                             "Недоступен" if r.available is False else "Проверка..."),
-                    "jobs_sent": r.jobs_sent, "current_job": r.current_job,
-                    "last_error": r.last_error,
+                    "name": runtime.config.name, "host": host, "port": runtime.config.port,
+                    "status": "Занят" if runtime.busy else
+                              "Доступен" if runtime.available is True else
+                              "Недоступен" if runtime.available is False else "Проверка...",
+                    "jobs_sent": runtime.jobs_sent, "current_job": runtime.current_job,
+                    "last_error": runtime.last_error,
                 }
-                for host, r in self._printer_runtime.items()
+                for host, runtime in self._printer_runtime.items()
             ],
         }

@@ -83,7 +83,7 @@ class PrinterDialog(tk.Toplevel):
             body,
             text=("Драйвер назначается общей виртуальной очереди Windows. "
                   "Физическим устройствам передаётся уже сформированный RAW-поток."),
-            wraplength=390, justify="left", foreground="#777777",
+            wraplength=390, justify="left", style="Muted.TLabel",
         ).grid(row=4, column=0, columnspan=2, sticky="w", pady=(0, 10))
         buttons = ttk.Frame(body)
         buttons.grid(row=5, column=0, columnspan=2, sticky="e")
@@ -194,7 +194,7 @@ class PrintRoundRobinApp:
         ttk.Label(header, text="PRINT ROUND ROBIN", style="Title.TLabel").pack(side="left")
         ttk.Label(
             header, text="Windows 10/11  •  Tkinter  •  RAW TCP",
-            foreground="#666666",
+            style="Muted.TLabel",
         ).pack(side="left", padx=16)
         self.engine_badge = ttk.Label(
             header, text="● ОСТАНОВЛЕН", foreground="#a33",
@@ -245,7 +245,7 @@ class PrintRoundRobinApp:
         self._build_windows_tab()
         self._build_logs()
         self.footer_var = tk.StringVar(value=str(self.store.path))
-        ttk.Label(outer, textvariable=self.footer_var, style="Muted.TLabel", anchor="w").pack(fill="x", pady=(7, 0))
+        ttk.Label(outer, textvariable=self.footer_var, style="App.Muted.TLabel", anchor="w").pack(fill="x", pady=(7, 0))
         self._install_context_menus()
 
     def _walk_widgets(self, parent):
@@ -601,7 +601,7 @@ class PrintRoundRobinApp:
         ttk.Button(toolbar, text="↓ Ниже", command=lambda: self.move_selected_printers(1)).pack(side="left", padx=3)
         ttk.Label(
             toolbar, text="Ctrl/Shift — выбор • Alt+↑/↓ — порядок • Сохраните настройки",
-            foreground="#666666",
+            style="Muted.TLabel",
         ).pack(side="right")
         self.printer_config_tree = self._tree(
             self.printers_tab,
@@ -664,13 +664,13 @@ class PrintRoundRobinApp:
             text=("SNMP read-only. Для устройств обычно требуется включить SNMP v1/v2c в веб-интерфейсе Kyocera. "
                   "По умолчанию community — public; при отключённом SNMP будут показываться только доступность TCP "
                   "и задания, но не аппаратные ошибки."),
-            wraplength=920, justify="left", foreground="#777777",
+            wraplength=920, justify="left", style="Muted.TLabel",
         ).grid(row=4, column=0, columnspan=4, sticky="w", pady=(9, 0))
 
         ttk.Label(
             frame,
             text="Программа должна оставаться запущенной, пока требуется печать через виртуальную очередь.",
-            foreground="#777777", wraplength=920,
+            style="Muted.TLabel", wraplength=920,
         ).grid(row=row + 3, column=0, columnspan=3, sticky="w", pady=(8, 0))
     def _build_windows_tab(self):
         queue_box = ttk.LabelFrame(self.windows_tab, text="Виртуальная очередь Windows", padding=12)
@@ -678,7 +678,7 @@ class PrintRoundRobinApp:
         self.queue_info_var = tk.StringVar(value="Получение сведений о принтере...")
         ttk.Label(queue_box, textvariable=self.queue_info_var, justify="left").pack(anchor="w")
         self.windows_status_var = tk.StringVar()
-        ttk.Label(queue_box, textvariable=self.windows_status_var, foreground="#666666").pack(anchor="w", pady=(6, 0))
+        ttk.Label(queue_box, textvariable=self.windows_status_var, style="Muted.TLabel").pack(anchor="w", pady=(6, 0))
 
         driver_box = ttk.LabelFrame(self.windows_tab, text="Установленный драйвер", padding=12)
         driver_box.pack(fill="x", pady=(0, 12))
@@ -692,7 +692,7 @@ class PrintRoundRobinApp:
         ttk.Label(
             driver_box,
             text="Отображаются драйверы, уже установленные в диспетчере печати Windows.",
-            foreground="#666666",
+            style="Muted.TLabel",
         ).pack(anchor="w", pady=(8, 0))
         actions = ttk.Frame(self.windows_tab)
         actions.pack(fill="x", pady=4)
@@ -708,7 +708,7 @@ class PrintRoundRobinApp:
             self.windows_tab,
             text=("Настройка очереди требует подтверждения UAC. Отдельные PowerShell-файлы не используются: "
                   "команды Windows PrintManagement запускаются непосредственно из приложения."),
-            foreground="#666666", wraplength=900,
+            style="Muted.TLabel", wraplength=900,
         ).pack(anchor="w", pady=(12, 0))
 
     def _build_logs(self):
@@ -815,7 +815,6 @@ class PrintRoundRobinApp:
         if not confirmed:
             return
 
-        previous = self.config
         defaults = AppConfig()
         try:
             self.store.save(defaults)
@@ -923,6 +922,13 @@ class PrintRoundRobinApp:
         return indices[0]
 
     def _ensure_engine_stopped(self) -> bool:
+        if self.engine_starting:
+            messagebox.showwarning(
+                "Изменение конфигурации",
+                "Дождитесь завершения запуска или остановки ретранслятора.",
+                parent=self.root,
+            )
+            return False
         if self.engine and self.engine.running:
             messagebox.showwarning("Изменение конфигурации", "Сначала остановите ретранслятор.", parent=self.root)
             return False

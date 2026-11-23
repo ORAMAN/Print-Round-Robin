@@ -922,7 +922,8 @@ class PrintRoundRobinApp:
         current_job = row.get("current_job", "")
         tcp_down = row.get("status") == "Недоступен"
         snmp_available = row.get("snmp_available")
-        errors = device.get("errors") or []
+        device_stale = bool(device.get("stale"))
+        errors = [] if device_stale else (device.get("errors") or [])
         state = "unknown"
         title = "СОСТОЯНИЕ НЕИЗВЕСТНО"
 
@@ -971,8 +972,12 @@ class PrintRoundRobinApp:
         else:
             detail = "Ожидание данных состояния устройства"
 
-        toner_text = device.get("toner_text", "Уровень тонера не сообщается") if device else "Тонер: нет данных"
-        supplies = device.get("supplies") or []
+        toner_text = (
+            "Последние данные устарели — SNMP не отвечает"
+            if device_stale else
+            device.get("toner_text", "Уровень тонера не сообщается") if device else "Тонер: нет данных"
+        )
+        supplies = [] if device_stale else (device.get("supplies") or [])
         consumable_warnings = []
         for supply in supplies:
             name = str(supply.get("name", ""))
@@ -1084,6 +1089,8 @@ class PrintRoundRobinApp:
         ]
         if device:
             lines.append(f"Состояние устройства: {device.get('state_text', device.get('state', 'неизвестно'))}")
+            if device.get("stale"):
+                lines.append("ВНИМАНИЕ: это последнее сохранённое состояние; текущий опрос SNMP не отвечает.")
             lines.append(f"SNMP-имя: {device.get('name', '—')}")
             lines.append(f"Последний опрос: {time.strftime('%d.%m.%Y %H:%M:%S', time.localtime(device.get('polled_at', time.time())))}")
             lines.append("")

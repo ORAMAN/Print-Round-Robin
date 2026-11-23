@@ -96,3 +96,41 @@ def test_default_config_uses_face_search_dark_theme():
     config = AppConfig()
     config.validate()
     assert config.theme == "dark"
+
+
+
+def test_queue_management_defaults_keep_sharing_disabled():
+    config = AppConfig()
+    config.validate()
+    assert config.auto_manage_queue is True
+    assert config.share_enabled is False
+    assert config.share_name == "KyoceraRoundRobin"
+    assert config.share_server == ""
+
+
+def test_network_share_settings_round_trip(tmp_path):
+    store = ConfigStore(tmp_path / "settings.json")
+    config = AppConfig(
+        auto_manage_queue=True,
+        share_enabled=True,
+        share_name="Kyocera_Main",
+        share_server="printserver.example.local",
+    )
+    store.save(config)
+    restored = store.load()
+    assert restored.auto_manage_queue is True
+    assert restored.share_enabled is True
+    assert restored.share_name == "Kyocera_Main"
+    assert restored.share_server == "printserver.example.local"
+
+
+def test_invalid_printer_share_name_is_rejected():
+    config = AppConfig(share_enabled=True, share_name="Kyocera/Office")
+    with pytest.raises(ValueError, match="недопустимые символы"):
+        config.validate()
+
+
+def test_invalid_printer_share_server_is_rejected():
+    config = AppConfig(share_server=r"\\printserver\share")
+    with pytest.raises(ValueError, match="Имя сервера"):
+        config.validate()

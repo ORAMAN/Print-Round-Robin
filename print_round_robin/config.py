@@ -61,6 +61,13 @@ class AppConfig:
     max_workers: int = 10
     auto_start_engine: bool = False
     start_with_windows: bool = False
+    theme: str = "light"
+    snmp_enabled: bool = True
+    snmp_version: str = "2c"
+    snmp_community: str = "public"
+    snmp_port: int = 161
+    snmp_timeout: float = 0.8
+    snmp_interval: float = 10.0
     printers: list[PrinterConfig] = field(default_factory=lambda: [
         PrinterConfig(name=f"Kyocera {i}", host=f"192.168.20.{i}")
         for i in range(121, 131)
@@ -94,6 +101,15 @@ class AppConfig:
             raise ValueError("Размер буфера должен быть от 4 КБ до 8 МБ.")
         self.max_receivers = int(self.max_receivers)
         self.max_workers = int(self.max_workers)
+        self.theme = "dark" if str(self.theme).lower() in ("dark", "night", "тёмная", "темная") else "light"
+        self.snmp_enabled = bool(self.snmp_enabled)
+        self.snmp_version = "1" if str(self.snmp_version).lower() in ("1", "v1") else "2c"
+        self.snmp_community = str(self.snmp_community).strip() or "public"
+        self.snmp_port = int(self.snmp_port)
+        if not 1 <= self.snmp_port <= 65535:
+            raise ValueError("SNMP-порт должен находиться в диапазоне 1–65535.")
+        self.snmp_timeout = _bounded_float(self.snmp_timeout, "SNMP-таймаут", 0.1, 10.0)
+        self.snmp_interval = _bounded_float(self.snmp_interval, "Интервал SNMP-опроса", 2.0, 300.0)
         if not 1 <= self.max_receivers <= 100:
             raise ValueError("Количество входящих потоков должно быть от 1 до 100.")
         if not 1 <= self.max_workers <= 50:

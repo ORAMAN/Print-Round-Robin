@@ -211,12 +211,16 @@ class ConfigStore:
             config = AppConfig.from_dict(raw)
             # Migrate only untouched default labels from the old host-octet naming.
             migrated = False
-            for index, printer in enumerate(config.printers, start=1):
-                expected_host = f"192.168.20.{index + 120}"
-                old_name = f"Kyocera {index + 120}"
-                if printer.host == expected_host and printer.name == old_name:
-                    printer.name = f"Kyocera {index}"
-                    migrated = True
+            for printer in config.printers:
+                try:
+                    host_octet = int(printer.host.rsplit(".", 1)[1])
+                except (IndexError, ValueError):
+                    continue
+                if 121 <= host_octet <= 130:
+                    old_name = f"Kyocera {host_octet}"
+                    if printer.host == f"192.168.20.{host_octet}" and printer.name == old_name:
+                        printer.name = f"Kyocera {host_octet - 120}"
+                        migrated = True
             if migrated:
                 self.save(config)
             return config

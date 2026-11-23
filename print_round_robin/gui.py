@@ -79,8 +79,14 @@ class PrinterDialog(tk.Toplevel):
         ttk.Checkbutton(
             body, text="Участвует в распределении", variable=self.enabled_var
         ).grid(row=3, column=0, columnspan=2, sticky="w", pady=(8, 12))
+        ttk.Label(
+            body,
+            text=("Драйвер назначается общей виртуальной очереди Windows. "
+                  "Физическим устройствам передаётся уже сформированный RAW-поток."),
+            wraplength=390, justify="left", foreground="#777777",
+        ).grid(row=4, column=0, columnspan=2, sticky="w", pady=(0, 10))
         buttons = ttk.Frame(body)
-        buttons.grid(row=4, column=0, columnspan=2, sticky="e")
+        buttons.grid(row=5, column=0, columnspan=2, sticky="e")
         ttk.Button(buttons, text="Отмена", command=self.destroy).pack(side="right", padx=(6, 0))
         ttk.Button(buttons, text="Сохранить", command=self._save).pack(side="right")
         self.bind("<Return>", lambda _event: self._save())
@@ -181,7 +187,7 @@ class PrintRoundRobinApp:
         self.theme_manager.apply(self.config.theme)
 
     def _build_ui(self):
-        outer = ttk.Frame(self.root, padding=10)
+        outer = ttk.Frame(self.root, padding=10, style="App.TFrame")
         outer.pack(fill="both", expand=True)
         header = ttk.Frame(outer)
         header.pack(fill="x", pady=(0, 8))
@@ -209,6 +215,10 @@ class PrintRoundRobinApp:
         ttk.Button(toolbar, text="Сохранить настройки", command=self.save_settings).pack(side="left")
         ttk.Button(toolbar, text="Импорт JSON", command=self.import_settings).pack(side="left", padx=6)
         ttk.Button(toolbar, text="Экспорт JSON", command=self.export_settings).pack(side="left")
+        ttk.Button(
+            toolbar, text="Сброс настроек", style="Danger.TButton",
+            command=self.reset_settings,
+        ).pack(side="left", padx=(8, 0))
         self.theme_button = ttk.Button(toolbar, text="", command=self.toggle_theme)
         self.theme_button.pack(side="right")
         self._update_theme_button()
@@ -235,7 +245,176 @@ class PrintRoundRobinApp:
         self._build_windows_tab()
         self._build_logs()
         self.footer_var = tk.StringVar(value=str(self.store.path))
-        ttk.Label(outer, textvariable=self.footer_var, foreground="#666666", anchor="w").pack(fill="x", pady=(7, 0))
+        ttk.Label(outer, textvariable=self.footer_var, style="Muted.TLabel", anchor="w").pack(fill="x", pady=(7, 0))
+        self._install_context_menus()
+
+    def _walk_widgets(self, parent):
+        for child in parent.winfo_children():
+            yield child
+            yield from self._walk_widgets(child)
+
+    @staticmethod
+    def _is_editable_widget(widget) -> bool:
+        editable_types = (tk.Entry, tk.Text, tk.Spinbox, ttk.Entry, ttk.Combobox, ttk.Spinbox)
+        return isinstance(widget, editable_types)
+
+    def _install_context_menus(self):
+        self.text_context_menu = tk.Menu(self.root, tearoff=0)
+        self.text_context_menu.add_command(label="Отменить", command=lambda: self._edit_focused("<<Undo>>"))
+        self.text_context_menu.add_command(label="Повторить", command=lambda: self._edit_focused("<<Redo>>"))
+        self.text_context_menu.add_separator()
+        self.text_context_menu.add_command(label="Вырезать", command=lambda: self._edit_focused("<<Cut>>"))
+        self.text_context_menu.add_command(label="Копировать", command=lambda: self._edit_focused("<<Copy>>"))
+        self.text_context_menu.add_command(label="Вставить", command=lambda: self._edit_focused("<<Paste>>"))
+        self.text_context_menu.add_command(label="Удалить", command=self._delete_focused_selection)
+        self.text_context_menu.add_separator()
+        self.text_context_menu.add_command(label="Выделить всё", command=self._select_all_focused)
+
+        for widget in self._walk_widgets(self.root):
+            if self._is_editable_widget(widget):
+                widget.bind("<Button-3>", self._show_text_context_menu, add="+")
+                widget.bind("<Shift-F10>", self._show_text_context_menu, add="+")
+
+        self.root.bind_all("<KeyPress>", self._handle_global_edit_shortcuts, add="+")
+
+        self.printer_context_menu = tk.Menu(self.root, tearoff=0)
+        self.printer_context_menu.add_command(label="Изменить", command=self.edit_printer)
+        self.printer_context_menu.add_separator()
+        self.printer_context_menu.add_command(label="Включить выбранные", command=self.enable_selected_printers)
+        self.printer_context_menu.add_command(label="Выключить выбранные", command=self.disable_selected_printers)
+        self.printer_context_menu.add_command(label="Удалить выбранные", command=self.delete_printer)
+        self.printer_context_menu.add_separator()
+        self.printer_context_menu.add_command(label="Переместить выше", command=lambda: self.move_selected_printers(-1))
+        self.printer_context_menu.add_command(label="Переместить ниже", command=lambda: self.move_selected_printers(1))
+        self.printer_context_menu.add_separator()
+        self.printer_context_menu.add_command(label="Выделить все", command=self._select_all_printers)
+        self.printer_config_tree.bind("<Button-3>", self._show_printer_context_menu, add="+")
+        self.printer_config_tree.bind("<Shift-F10>", self._show_printer_keyboard_menu, add="+")
+
+    def _show_text_context_menu(self, event):
+        widget = event.widget
+        if self._is_editable_widget(widget):
+            widget.focus_set()
+            try:
+                self.text_context_menu.tk_popup(event.x_root, event.y_root)
+            finally:
+                self.text_context_menu.grab_release()
+        return "break"
+
+    def _edit_focused(self, virtual_event: str):
+        widget = self.root.focus_get()
+        if not self._is_editable_widget(widget):
+            return
+        try:
+            widget.event_generate(virtual_event)
+        except tk.TclError:
+            pass
+
+    def _select_all_focused(self):
+        widget = self.root.focus_get()
+        if isinstance(widget, tk.Text):
+            widget.tag_add("sel", "1.0", "end-1c")
+            widget.mark_set("insert", "end-1c")
+            return
+        if isinstance(widget, (tk.Entry, tk.Spinbox, ttk.Entry, ttk.Combobox, ttk.Spinbox)):
+            try:
+                widget.selection_range(0, "end")
+                widget.icursor("end")
+            except tk.TclError:
+                pass
+
+    def _delete_focused_selection(self):
+        widget = self.root.focus_get()
+        if isinstance(widget, tk.Text):
+            try:
+                widget.delete("sel.first", "sel.last")
+            except tk.TclError:
+                pass
+            return
+        if isinstance(widget, (tk.Entry, tk.Spinbox, ttk.Entry, ttk.Combobox, ttk.Spinbox)):
+            try:
+                if widget.selection_present():
+                    widget.delete("sel.first", "sel.last")
+            except tk.TclError:
+                pass
+
+    def _handle_global_edit_shortcuts(self, event):
+        widget = self.root.focus_get()
+        if not self._is_editable_widget(widget):
+            return
+        control = bool(event.state & 0x4)
+        shift = bool(event.state & 0x1)
+        keycode = getattr(event, "keycode", 0)
+        keysym = str(getattr(event, "keysym", "")).casefold()
+
+        # Windows virtual-key codes keep the physical key position stable
+        # across Russian/English layouts; keysyms cover other Tk platforms.
+        physical = {
+            65: "a", 67: "c", 86: "v", 88: "x",
+            89: "y", 90: "z", 45: "insert", 46: "delete",
+        }
+        key = physical.get(keycode, keysym)
+        layout_aliases = {
+            "cyrillic_ef": "a", "cyrillic_es": "c", "cyrillic_em": "v",
+            "cyrillic_che": "x", "cyrillic_en": "y", "cyrillic_ya": "z",
+        }
+        key = layout_aliases.get(key, key)
+
+        action = None
+        if control:
+            action = {
+                "a": "select", "c": "<<Copy>>", "v": "<<Paste>>",
+                "x": "<<Cut>>", "z": "<<Undo>>", "y": "<<Redo>>",
+            }.get(key)
+            if key == "insert":
+                action = "<<Copy>>"
+        elif shift and key == "insert":
+            action = "<<Paste>>"
+        elif shift and key == "delete":
+            action = "<<Cut>>"
+
+        if action == "select":
+            self._select_all_focused()
+            return "break"
+        if action:
+            self._edit_focused(action)
+            return "break"
+        return None
+
+    def _select_all_printers(self):
+        items = self.printer_config_tree.get_children()
+        if items:
+            self.printer_config_tree.selection_set(*items)
+
+    def _show_printer_context_menu(self, event):
+        tree = self.printer_config_tree
+        row = tree.identify_row(event.y)
+        if row and row not in tree.selection():
+            tree.selection_set(row)
+            tree.focus(row)
+        if tree.selection():
+            try:
+                self.printer_context_menu.tk_popup(event.x_root, event.y_root)
+            finally:
+                self.printer_context_menu.grab_release()
+        return "break"
+
+    def _show_printer_keyboard_menu(self, _event):
+        tree = self.printer_config_tree
+        selected = tree.selection()
+        row = selected[0] if selected else tree.focus()
+        bbox = tree.bbox(row) if row else ()
+        if bbox:
+            x = tree.winfo_rootx() + bbox[0]
+            y = tree.winfo_rooty() + bbox[1] + bbox[3]
+        else:
+            x = tree.winfo_rootx() + 20
+            y = tree.winfo_rooty() + 40
+        try:
+            self.printer_context_menu.tk_popup(x, y)
+        finally:
+            self.printer_context_menu.grab_release()
+        return "break"
 
     def _tree(self, parent, columns, titles, widths):
         frame = ttk.Frame(parent)
@@ -545,6 +724,9 @@ class PrintRoundRobinApp:
         self._update_theme_button()
         self._refresh_printer_config_tree()
         self._rebuild_printer_cards()
+        # Native Tk widgets (especially the status legend) are created after
+        # the first theme apply. Repaint them once the full widget tree exists.
+        self._apply_dashboard_theme()
         self.footer_var.set(f"Настройки: {self.store.path}")
 
     def _config_from_controls(self) -> AppConfig:

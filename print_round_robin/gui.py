@@ -125,7 +125,7 @@ class PrintRoundRobinApp:
         self.root = root
         self.root.title("Print Round Robin — управление печатью")
         self.root.geometry("1600x900")
-        self.root.minsize(1280, 800)
+        self.root.minsize(1100, 650)
         try:
             self.root.state("zoomed")
         except tk.TclError:
@@ -964,12 +964,12 @@ class PrintRoundRobinApp:
         error_texts = [str(item.get("text", "")).strip() for item in errors if item.get("text")]
         if tcp_down and snmp_available is not True:
             detail = "Нет ответа от RAW TCP и SNMP"
-        elif tcp_down and snmp_available is True:
-            detail = "Устройство отвечает по SNMP, но RAW TCP-порт печати недоступен"
         elif error_texts:
             detail = "  •  ".join(error_texts[:2])
             if len(error_texts) > 2:
                 detail += f"  (+{len(error_texts) - 2})"
+        elif tcp_down and snmp_available is True:
+            detail = "Устройство отвечает по SNMP, но RAW TCP-порт печати недоступен"
         elif current_job:
             detail = f"Документ: {current_job}"
         elif snmp_available is False:

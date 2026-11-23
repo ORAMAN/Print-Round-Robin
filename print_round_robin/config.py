@@ -208,22 +208,7 @@ class ConfigStore:
             raw = json.loads(self.path.read_text(encoding="utf-8-sig"))
             if not isinstance(raw, dict):
                 raise ValueError("Корень файла настроек должен быть JSON-объектом.")
-            config = AppConfig.from_dict(raw)
-            # Migrate only untouched default labels from the old host-octet naming.
-            migrated = False
-            for printer in config.printers:
-                try:
-                    host_octet = int(printer.host.rsplit(".", 1)[1])
-                except (IndexError, ValueError):
-                    continue
-                if 121 <= host_octet <= 130:
-                    old_name = f"Kyocera {host_octet}"
-                    if printer.host == f"192.168.20.{host_octet}" and printer.name == old_name:
-                        printer.name = f"Kyocera {host_octet - 120}"
-                        migrated = True
-            if migrated:
-                self.save(config)
-            return config
+            return AppConfig.from_dict(raw)
         except (OSError, json.JSONDecodeError, TypeError, ValueError, KeyError) as exc:
             backup = self.path.with_suffix(self.path.suffix + ".broken")
             try:

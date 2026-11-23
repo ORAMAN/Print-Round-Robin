@@ -61,7 +61,7 @@ class AppConfig:
     max_workers: int = 10
     auto_start_engine: bool = False
     start_with_windows: bool = False
-    theme: str = "light"
+    theme: str = "dark"
     snmp_enabled: bool = True
     snmp_version: str = "2c"
     snmp_community: str = "public"

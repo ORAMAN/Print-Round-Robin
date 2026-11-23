@@ -321,8 +321,8 @@ def _poll_alerts(client: SnmpClient) -> list[dict]:
             continue
         suffix = _index_from_oid(item.oid, PRT_ALERT_DESCRIPTION)
         severity = severities.get(suffix)
-        # RFC 3805 severity: critical(3), warning(4) and vendor "other".
-        level = "critical" if severity == 3 else "warning"
+        # RFC 3805: critical(3), warning(4), warningBinaryChangeEvent(5), other(1).
+        level = "critical" if severity == 3 else "warning" if severity in (4, 5) else "info"
         alerts.append({"text": description, "severity": level})
     return alerts
 

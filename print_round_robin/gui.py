@@ -7,6 +7,7 @@ import logging.handlers
 import os
 import queue
 import subprocess
+import socket
 import threading
 import time
 from pathlib import Path
@@ -160,6 +161,7 @@ class PrintRoundRobinApp:
         self.admin_action_kind = ""
         self.admin_started_at = 0.0
         self.driver_names: list[str] = []
+        self._auto_queue_setup_attempted = False
         self._closing = False
 
         self._build_style()
@@ -178,6 +180,7 @@ class PrintRoundRobinApp:
         self.root.after(1200, self._refresh_dashboard)
         self.root.after(300, self._refresh_queue_info)
         self.root.after(400, self.refresh_drivers)
+        self.root.after(900, self.check_virtual_queue)
         if minimized:
             self.root.iconify()
         if self.config.auto_start_engine:
@@ -688,6 +691,42 @@ class PrintRoundRobinApp:
             text="Отображаются драйверы, уже установленные в диспетчере печати Windows.",
             style="Muted.TLabel",
         ).pack(anchor="w", pady=(8, 0))
+
+        self.auto_manage_queue_var = tk.BooleanVar(value=self.config.auto_manage_queue)
+        ttk.Checkbutton(
+            self.windows_tab,
+            text="Автоматически проверять и исправлять виртуальную очередь при запуске и сохранении её параметров (UAC при необходимости)",
+            variable=self.auto_manage_queue_var,
+        ).pack(anchor="w", pady=(0, 10))
+
+        share_box = ttk.LabelFrame(self.windows_tab, text="Общий сетевой принтер для клиентских компьютеров", padding=12)
+        share_box.pack(fill="x", pady=(0, 12))
+        self.share_enabled_var = tk.BooleanVar(value=self.config.share_enabled)
+        ttk.Checkbutton(
+            share_box,
+            text="Публиковать виртуальную очередь в локальной сети",
+            variable=self.share_enabled_var,
+            command=self._update_share_path_hint,
+        ).grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 8))
+        ttk.Label(share_box, text="Имя общего ресурса:").grid(row=1, column=0, sticky="w", padx=(0, 8))
+        self.share_name_var = tk.StringVar(value=self.config.share_name)
+        ttk.Entry(share_box, textvariable=self.share_name_var, width=28).grid(row=1, column=1, sticky="w")
+        ttk.Label(share_box, text="Имя сервера / IP:").grid(row=1, column=2, sticky="w", padx=(18, 8))
+        self.share_server_var = tk.StringVar(value=self.config.share_server)
+        ttk.Entry(share_box, textvariable=self.share_server_var, width=28).grid(row=1, column=3, sticky="w")
+        self.share_path_var = tk.StringVar()
+        ttk.Label(share_box, textvariable=self.share_path_var, style="Muted.TLabel").grid(
+            row=2, column=0, columnspan=4, sticky="w", pady=(8, 0)
+        )
+        self.share_name_var.trace_add("write", lambda *_: self._update_share_path_hint())
+        self.share_server_var.trace_add("write", lambda *_: self._update_share_path_hint())
+        ttk.Label(
+            share_box,
+            text=("Пустое поле сервера означает имя текущего компьютера. Публикация открывает очередь для сетевого доступа; "
+                  "проверьте профиль сети и правила брандмауэра Windows."),
+            style="Muted.TLabel", wraplength=980, justify="left",
+        ).grid(row=3, column=0, columnspan=4, sticky="w", pady=(8, 0))
+
         actions = ttk.Frame(self.windows_tab)
         actions.pack(fill="x", pady=4)
         ttk.Button(
@@ -695,15 +734,34 @@ class PrintRoundRobinApp:
             style="Main.TButton", command=self.setup_queue,
         ).pack(side="left")
         ttk.Button(
+            actions, text="Создать BAT для клиентских ПК",
+            command=self.export_client_installer,
+        ).pack(side="left", padx=8)
+        ttk.Button(
+            actions, text="Проверить конфигурацию",
+            command=self.check_virtual_queue,
+        ).pack(side="left")
+        ttk.Button(
             actions, text="Остановить и удалить старый ретранслятор (UAC)",
             command=self.remove_legacy_task,
         ).pack(side="left", padx=8)
         ttk.Label(
             self.windows_tab,
-            text=("Настройка очереди требует подтверждения UAC. Отдельные PowerShell-файлы не используются: "
-                  "команды Windows PrintManagement запускаются непосредственно из приложения."),
-            style="Muted.TLabel", wraplength=900,
+            text=("На сервере очередь и TCP/IP-порт автоматически сверяются с настройками. При расхождении Windows запросит UAC. "
+                  "На клиентских ПК запустите сформированный BAT-файл: он запросит права администратора и подключит общую очередь. "
+                  "В организациях с ограничениями Point and Print может потребоваться групповая политика или предварительная установка драйвера."),
+            style="Muted.TLabel", wraplength=1000, justify="left",
         ).pack(anchor="w", pady=(12, 0))
+
+    def _update_share_path_hint(self):
+        if not hasattr(self, "share_path_var"):
+            return
+        server = self.share_server_var.get().strip() or socket.gethostname()
+        share = self.share_name_var.get().strip()
+        if self.share_enabled_var.get() and share:
+            self.share_path_var.set(f"Сетевой путь: \\\\{server}\\{share}")
+        else:
+            self.share_path_var.set("Публикация выключена. Сетевой BAT можно сформировать после включения общего доступа.")
 
     def _build_logs(self):
         toolbar = ttk.Frame(self.logs_tab)
@@ -730,6 +788,11 @@ class PrintRoundRobinApp:
         self.snmp_timeout_var.set(str(self.config.snmp_timeout))
         self.snmp_interval_var.set(str(self.config.snmp_interval))
         self.driver_var.set(self.config.driver_name)
+        self.auto_manage_queue_var.set(self.config.auto_manage_queue)
+        self.share_enabled_var.set(self.config.share_enabled)
+        self.share_name_var.set(self.config.share_name)
+        self.share_server_var.set(self.config.share_server)
+        self._update_share_path_hint()
         self.theme_manager.apply(self.config.theme)
         self._update_theme_button()
         self._refresh_printer_config_tree()
@@ -751,6 +814,10 @@ class PrintRoundRobinApp:
             else:
                 values[key] = float(raw.replace(",", "."))
         values["driver_name"] = self.driver_var.get().strip()
+        values["auto_manage_queue"] = bool(self.auto_manage_queue_var.get())
+        values["share_enabled"] = bool(self.share_enabled_var.get())
+        values["share_name"] = self.share_name_var.get().strip()
+        values["share_server"] = self.share_server_var.get().strip()
         values["auto_start_engine"] = bool(self.auto_start_var.get())
         values["start_with_windows"] = bool(self.windows_startup_var.get())
         values["snmp_enabled"] = bool(self.snmp_enabled_var.get())
@@ -773,6 +840,11 @@ class PrintRoundRobinApp:
                     )
                 return False
             was_startup = self.config.start_with_windows
+            queue_settings = ("queue_name", "port_name", "driver_name", "listener_host",
+                              "listener_port", "auto_manage_queue", "share_enabled", "share_name", "share_server")
+            queue_settings_changed = any(
+                getattr(candidate, key) != getattr(self.config, key) for key in queue_settings
+            )
             self.store.save(candidate)
             self.config = candidate
             self.theme_manager.apply(candidate.theme)
@@ -784,7 +856,10 @@ class PrintRoundRobinApp:
                 except Exception as exc:
                     messagebox.showwarning("Автозапуск", str(exc), parent=self.root)
             self._refresh_printer_config_tree()
+            self._update_share_path_hint()
             self.footer_var.set(f"Настройки сохранены: {self.store.path}")
+            if queue_settings_changed and os.name == "nt":
+                self.root.after(500, self.check_virtual_queue)
             if not silent:
                 messagebox.showinfo("Настройки", "Настройки сохранены.", parent=self.root)
             return True
@@ -1065,18 +1140,102 @@ class PrintRoundRobinApp:
     def setup_queue(self):
         if not self._ensure_engine_stopped() or not self.save_settings(silent=True):
             return
-        if not self.driver_var.get().strip():
+        if not self.config.driver_name:
             messagebox.showwarning("Драйвер", "Выберите установленный драйвер Kyocera.", parent=self.root)
+            return
+        self._launch_queue_setup(automatic=False)
+
+    def _launch_queue_setup(self, automatic: bool = False):
+        if self.admin_result_path is not None:
+            return
+        if automatic and (not self.config.auto_manage_queue or not self.config.driver_name):
             return
         try:
             self.admin_result_path = windows.request_elevated_action({
                 "action": "setup_queue", "config": self.config.to_dict()
             })
-            self.admin_action_kind = "setup"
+            self.admin_action_kind = "auto_setup" if automatic else "setup"
             self.admin_started_at = time.monotonic()
-            self.windows_status_var.set("Ожидание подтверждения UAC и настройки виртуальной очереди...")
+            self.windows_status_var.set(
+                "Обнаружено расхождение. Ожидание подтверждения UAC для автоматической настройки..."
+                if automatic else
+                "Ожидание подтверждения UAC и настройки виртуальной очереди..."
+            )
+            self.logger.info(
+                "Запрошена %s настройка виртуальной очереди Windows.",
+                "автоматическая" if automatic else "ручная",
+            )
         except Exception as exc:
-            messagebox.showerror("Настройка очереди", str(exc), parent=self.root)
+            self.windows_status_var.set("Не удалось запустить настройку виртуальной очереди.")
+            self.logger.error("Настройка очереди: %s", exc)
+            if not automatic:
+                messagebox.showerror("Настройка очереди", str(exc), parent=self.root)
+
+    def check_virtual_queue(self):
+        if os.name != "nt" or self.admin_result_path is not None:
+            return
+        config = self.config
+        self.windows_status_var.set("Проверка виртуальной очереди, TCP/IP-порта и сетевой публикации...")
+        def worker():
+            try:
+                result = windows.inspect_virtual_printer(config)
+                self.events.put({"type": "queue_inspection", "result": result})
+            except Exception as exc:
+                self.events.put({"type": "queue_inspection_error", "message": str(exc)})
+        threading.Thread(target=worker, name="VirtualQueueInspector", daemon=True).start()
+
+    def _handle_queue_inspection(self, result: dict):
+        self._show_queue_info(result.get("queue"))
+        issues = result.get("issues") or []
+        if result.get("healthy"):
+            self.windows_status_var.set("Виртуальная очередь, TCP/IP-порт и параметры публикации соответствуют настройкам.")
+            self.logger.info("Проверка виртуальной очереди Windows: конфигурация корректна.")
+            return
+        detail = " ".join(str(item) for item in issues)
+        self.logger.warning("Обнаружено расхождение конфигурации Windows: %s", detail)
+        if not self.config.auto_manage_queue:
+            self.windows_status_var.set("Автоматическое исправление отключено. " + detail)
+            return
+        if not self.config.driver_name:
+            self.windows_status_var.set("Выберите драйвер на этой вкладке и сохраните настройки. " + detail)
+            return
+        if self.admin_result_path is not None:
+            return
+        if not self._auto_queue_setup_attempted:
+            self._auto_queue_setup_attempted = True
+            self._launch_queue_setup(automatic=True)
+        else:
+            self.windows_status_var.set("Конфигурация требует исправления. Нажмите «Настроить виртуальную очередь (UAC)». " + detail)
+
+    def export_client_installer(self):
+        if not self.save_settings(silent=True):
+            return
+        if not self.config.share_enabled:
+            messagebox.showwarning(
+                "Сетевая публикация",
+                "Сначала включите «Публиковать виртуальную очередь в локальной сети» и настройте её через UAC.",
+                parent=self.root,
+            )
+            return
+        server = self.config.share_server or socket.gethostname()
+        destination = filedialog.asksaveasfilename(
+            parent=self.root,
+            title="Сохранить установщик подключения принтера",
+            initialfile=f"Connect_{self.config.share_name}.bat",
+            defaultextension=".bat",
+            filetypes=[("Командный файл Windows", "*.bat")],
+        )
+        if not destination:
+            return
+        try:
+            windows.write_client_installer(Path(destination), server, self.config.share_name)
+            messagebox.showinfo(
+                "Установщик создан",
+                f"Файл сохранён:\n{destination}\n\nПередайте его пользователям и запускайте на клиентских ПК после публикации очереди на сервере.",
+                parent=self.root,
+            )
+        except Exception as exc:
+            messagebox.showerror("Установщик клиентов", str(exc), parent=self.root)
 
     def remove_legacy_task(self):
         if not self._ensure_engine_stopped():
@@ -1113,11 +1272,16 @@ class PrintRoundRobinApp:
                 message = result.get("message", "")
                 if result.get("success"):
                     self.windows_status_var.set(message.replace("\n", " • "))
-                    messagebox.showinfo("Готово", message, parent=self.root)
-                    if kind == "setup":
+                    if kind == "auto_setup":
+                        self.logger.info("Автоматическая настройка очереди завершена: %s", message.replace("\n", " "))
+                    else:
+                        messagebox.showinfo("Готово", message, parent=self.root)
+                    if kind in ("setup", "auto_setup"):
                         self._refresh_queue_info()
+                        self.root.after(1200, self.check_virtual_queue)
                 else:
                     self.windows_status_var.set("Ошибка административного действия.")
+                    self.logger.error("Ошибка административного действия: %s", message)
                     messagebox.showerror("Ошибка", message, parent=self.root)
             elif time.monotonic() - self.admin_started_at > 180:
                 self.admin_result_path = None
@@ -1212,6 +1376,10 @@ class PrintRoundRobinApp:
                 elif kind == "queue_info_error":
                     self.queue_info_var.set("Не удалось прочитать сведения об очереди.")
                     self.windows_status_var.set(event.get("message", ""))
+                elif kind == "queue_inspection":
+                    self._handle_queue_inspection(event.get("result", {}))
+                elif kind == "queue_inspection_error":
+                    self.windows_status_var.set("Проверка очереди Windows не выполнена: " + event.get("message", ""))
                 self.events.task_done()
         except queue.Empty:
             pass
@@ -1544,11 +1712,18 @@ class PrintRoundRobinApp:
         if not info:
             self.queue_info_var.set(f"Очередь «{self.config.queue_name}» не найдена.")
             return
+        shared = str(info.get("Shared", "")).strip().casefold() in ("true", "1", "yes")
+        if shared:
+            server = self.config.share_server or socket.gethostname()
+            share_text = f"Сетевой ресурс: \\\\{server}\\{info.get('ShareName', '')}"
+        else:
+            share_text = "Сетевой ресурс: не опубликован"
         self.queue_info_var.set(
             f"Имя: {info.get('Name', '')}\n"
             f"Драйвер: {info.get('DriverName', '')}\n"
             f"Порт: {info.get('PortName', '')}\n"
-            f"Состояние Windows: {info.get('PrinterStatus', '—')}"
+            f"Состояние Windows: {info.get('PrinterStatus', '—')}\n"
+            f"{share_text}"
         )
 
     def _poll_logs(self):

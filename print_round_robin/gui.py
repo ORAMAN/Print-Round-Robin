@@ -252,40 +252,140 @@ class PrintRoundRobinApp:
 
     def _build_monitor(self):
         metrics = ttk.Frame(self.monitor_tab)
-        metrics.pack(fill="x", pady=(0, 9))
+        metrics.pack(fill="x", pady=(0, 7))
         self.metric_vars = {}
         labels = (
             ("received", "Принято"),
-            ("queued", "В очереди"),
+            ("queued", "Ожидает"),
             ("active", "Передаётся"),
             ("completed", "Передано"),
             ("failed", "На проверке"),
         )
         for col, (key, title) in enumerate(labels):
-            card = ttk.LabelFrame(metrics, text=title, padding=10)
+            card = ttk.LabelFrame(metrics, text=title, padding=8)
             card.grid(row=0, column=col, sticky="nsew", padx=(0 if col == 0 else 6, 0))
             metrics.columnconfigure(col, weight=1)
             var = tk.StringVar(value="0")
             self.metric_vars[key] = var
             ttk.Label(card, textvariable=var, style="Metric.TLabel").pack()
+
+        legend = ttk.Frame(self.monitor_tab)
+        legend.pack(fill="x", pady=(0, 5))
+        self.legend_items = [
+            ("ready", "ГОТОВ / ОЖИДАЕТ"),
+            ("printing", "ПЕЧАТАЕТ"),
+            ("transfer", "ПЕРЕДАЧА"),
+            ("warning", "ПРЕДУПРЕЖДЕНИЕ"),
+            ("error", "ОШИБКА"),
+            ("offline", "НЕТ СВЯЗИ"),
+            ("warmup", "ПРОГРЕВ"),
+        ]
+        for key, caption in self.legend_items:
+            item = tk.Frame(legend, bd=0)
+            item.pack(side="left", padx=(0, 14))
+            dot = tk.Label(item, text="●", font=("Segoe UI", 10, "bold"))
+            dot.pack(side="left")
+            text = ttk.Label(item, text=caption, style="Muted.TLabel")
+            text.pack(side="left", padx=(4, 0))
+            self._legend_widgets = getattr(self, "_legend_widgets", [])
+            self._legend_widgets.append((key, item, dot))
+
         split = ttk.Panedwindow(self.monitor_tab, orient="vertical")
         split.pack(fill="both", expand=True)
-        printer_box = ttk.LabelFrame(split, text="Физические принтеры", padding=6)
+        printer_box = ttk.LabelFrame(split, text="Состояние физических принтеров  •  10 устройств", padding=5)
         job_box = ttk.LabelFrame(split, text="Задания печати", padding=6)
-        split.add(printer_box, weight=1)
-        split.add(job_box, weight=2)
-        self.printer_status_tree = self._tree(
-            printer_box,
-            ("name", "host", "status", "jobs", "current", "detail"),
-            ("Принтер", "IP-адрес", "Состояние", "Передано", "Текущее задание", "Последняя ошибка"),
-            (160, 135, 115, 85, 205, 280),
+        split.add(printer_box, weight=2)
+        split.add(job_box, weight=1)
+
+        self.printer_grid = tk.Frame(
+            printer_box, bg=self.theme_manager.palette["panel"], bd=0, highlightthickness=0
         )
+        self.printer_grid.pack(fill="both", expand=True)
+        for col in range(5):
+            self.printer_grid.grid_columnconfigure(col, weight=1, uniform="printer-card")
+        for row in range(2):
+            self.printer_grid.grid_rowconfigure(row, weight=1, uniform="printer-row")
+
+        self.printer_cards = {}
+        for index, printer in enumerate(self.config.printers[:10]):
+            self._create_printer_card(printer, index)
+
         self.job_tree = self._tree(
             job_box,
             ("id", "status", "size", "printer", "received", "progress"),
             ("ID задания", "Состояние", "Размер", "Принтер", "Принято", "Передача / ошибка"),
             (205, 150, 100, 140, 145, 310),
         )
+
+    def _create_printer_card(self, printer: PrinterConfig, index: int) -> None:
+        """Create one large status card; all ten cards remain visible in a 5x2 grid."""
+        palette = self.theme_manager.palette
+        state_palette = self.theme_manager.status[self.theme_manager.current]["unknown"]
+        frame = tk.Frame(
+            self.printer_grid,
+            bg=state_palette["bg"],
+            highlightbackground=state_palette["border"],
+            highlightcolor=state_palette["border"],
+            highlightthickness=2,
+            bd=0,
+            padx=9,
+            pady=7,
+        )
+        frame.grid(
+            row=index // 5, column=index % 5, sticky="nsew",
+            padx=4, pady=4,
+        )
+        header = tk.Frame(frame, bg=state_palette["bg"])
+        header.pack(fill="x")
+        name_label = tk.Label(
+            header, text=printer.name, bg=state_palette["bg"], fg=state_palette["title"],
+            font=("Segoe UI", 10, "bold"), anchor="w",
+        )
+        name_label.pack(side="left", fill="x", expand=True)
+        dot_label = tk.Label(
+            header, text="●", bg=state_palette["bg"], fg=state_palette["dot"],
+            font=("Segoe UI", 15, "bold"),
+        )
+        dot_label.pack(side="right")
+        ip_label = tk.Label(
+            frame, text=f"{printer.host}:{printer.port}", bg=state_palette["bg"],
+            fg=palette["muted"], font=("Segoe UI", 9), anchor="w",
+        )
+        ip_label.pack(fill="x", pady=(0, 3))
+        state_label = tk.Label(
+            frame, text="ОЖИДАНИЕ ЗАПУСКА", bg=state_palette["bg"],
+            fg=state_palette["text"], font=("Segoe UI", 13, "bold"), anchor="w",
+        )
+        state_label.pack(fill="x", pady=(1, 2))
+        detail_label = tk.Label(
+            frame, text="Состояние устройства пока не опрашивалось",
+            bg=state_palette["bg"], fg=state_palette["text"],
+            font=("Segoe UI", 9, "bold"), anchor="w", justify="left",
+            wraplength=250, height=2,
+        )
+        detail_label.pack(fill="x")
+        toner_label = tk.Label(
+            frame, text="Тонер: —", bg=state_palette["bg"],
+            fg=state_palette["text"], font=("Segoe UI", 9), anchor="w",
+        )
+        toner_label.pack(fill="x", pady=(3, 0))
+        footer_label = tk.Label(
+            frame, text="Сеть: проверка  •  SNMP: —  •  Заданий: 0",
+            bg=state_palette["bg"], fg=palette["muted"],
+            font=("Segoe UI", 8), anchor="w",
+        )
+        footer_label.pack(fill="x", side="bottom", pady=(5, 0))
+
+        card = {
+            "frame": frame, "header": header, "name": name_label, "dot": dot_label,
+            "ip": ip_label, "state": state_label, "detail": detail_label,
+            "toner": toner_label, "footer": footer_label,
+            "printer": printer,
+        }
+        self.printer_cards[printer.host] = card
+        for widget in (frame, header, name_label, dot_label, ip_label, state_label,
+                       detail_label, toner_label, footer_label):
+            widget.bind("<Double-Button-1>", lambda _event, host=printer.host: self.show_printer_details(host))
 
     def _build_printers(self):
         toolbar = ttk.Frame(self.printers_tab)

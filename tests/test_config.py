@@ -89,3 +89,10 @@ def test_selected_contiguous_printer_group_moves_as_a_block():
 def test_reorder_rejects_invalid_direction():
     with pytest.raises(ValueError, match="Направление"):
         reorder_printers([PrinterConfig("A", "192.0.2.1")], {"192.0.2.1"}, 0)
+
+
+
+def test_default_config_uses_face_search_dark_theme():
+    config = AppConfig()
+    config.validate()
+    assert config.theme == "dark"

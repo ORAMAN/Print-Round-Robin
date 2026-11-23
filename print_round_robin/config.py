@@ -73,8 +73,8 @@ class AppConfig:
     snmp_timeout: float = 0.8
     snmp_interval: float = 10.0
     printers: list[PrinterConfig] = field(default_factory=lambda: [
-        PrinterConfig(name=f"Kyocera {i}", host=f"192.168.20.{i}")
-        for i in range(121, 131)
+        PrinterConfig(name=f"Kyocera {index}", host=f"192.168.20.{index + 120}")
+        for index in range(1, 11)
     ])
 
     def validate(self) -> None:
@@ -208,7 +208,18 @@ class ConfigStore:
             raw = json.loads(self.path.read_text(encoding="utf-8-sig"))
             if not isinstance(raw, dict):
                 raise ValueError("Корень файла настроек должен быть JSON-объектом.")
-            return AppConfig.from_dict(raw)
+            config = AppConfig.from_dict(raw)
+            # Migrate only untouched default labels from the old host-octet naming.
+            migrated = False
+            for index, printer in enumerate(config.printers, start=1):
+                expected_host = f"192.168.20.{index + 120}"
+                old_name = f"Kyocera {index + 120}"
+                if printer.host == expected_host and printer.name == old_name:
+                    printer.name = f"Kyocera {index}"
+                    migrated = True
+            if migrated:
+                self.save(config)
+            return config
         except (OSError, json.JSONDecodeError, TypeError, ValueError, KeyError) as exc:
             backup = self.path.with_suffix(self.path.suffix + ".broken")
             try:

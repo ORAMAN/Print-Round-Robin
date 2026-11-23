@@ -405,7 +405,7 @@ class PrintRoundRobinApp:
         ttk.Button(toolbar, text="↑ Выше", command=lambda: self.move_selected_printers(-1)).pack(side="left", padx=(8, 3))
         ttk.Button(toolbar, text="↓ Ниже", command=lambda: self.move_selected_printers(1)).pack(side="left", padx=3)
         ttk.Label(
-            toolbar, text="Ctrl/Shift — выбор нескольких • Alt+↑/↓ — порядок",
+            toolbar, text="Ctrl/Shift — выбор • Alt+↑/↓ — порядок • Сохраните настройки",
             foreground="#666666",
         ).pack(side="right")
         self.printer_config_tree = self._tree(

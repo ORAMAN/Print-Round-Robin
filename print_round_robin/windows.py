@@ -225,10 +225,10 @@ def write_client_installer(destination: Path, server_name: str, share_name: str)
     share_name = str(share_name).strip()
     if not server_name or any(not (ch.isalnum() or ch in ".-_") for ch in server_name):
         raise WindowsIntegrationError("Имя сервера должно содержать только буквы, цифры, точку, дефис или подчёркивание.")
-    if (not share_name or len(share_name) > 80
-            or any(not (ch.isalnum() or ch in " _-.") for ch in share_name)
-            or share_name.endswith((".", " "))):
-        raise WindowsIntegrationError("Укажите корректное имя сетевого ресурса принтера.")
+    if (not share_name or len(share_name) > 31
+            or any(not (ch.isalnum() or ch in "_-.") for ch in share_name)
+            or share_name.endswith(".")):
+        raise WindowsIntegrationError("Имя сетевого ресурса должно быть до 31 символа без пробелов и спецсимволов.")
     printer_path = f"\\\\{server_name}\\{share_name}"
     lines = [
         "@echo off",

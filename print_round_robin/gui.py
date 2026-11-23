@@ -14,7 +14,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 from . import windows
-from .config import AppConfig, ConfigStore, PrinterConfig, app_data_dir
+from .config import AppConfig, ConfigStore, PrinterConfig, app_data_dir, reorder_printers
 from .engine import RoundRobinEngine
 from .theme import ThemeManager
 
@@ -398,11 +398,14 @@ class PrintRoundRobinApp:
         toolbar = ttk.Frame(self.printers_tab)
         toolbar.pack(fill="x", pady=(0, 8))
         ttk.Button(toolbar, text="Добавить", command=self.add_printer).pack(side="left")
-        ttk.Button(toolbar, text="Изменить", command=self.edit_printer).pack(side="left", padx=6)
-        ttk.Button(toolbar, text="Удалить", command=self.delete_printer).pack(side="left")
-        ttk.Button(toolbar, text="Включить / отключить", command=self.toggle_printer).pack(side="left", padx=6)
+        ttk.Button(toolbar, text="Изменить", command=self.edit_printer).pack(side="left", padx=5)
+        ttk.Button(toolbar, text="Удалить выбранные", command=self.delete_printer).pack(side="left")
+        ttk.Button(toolbar, text="Включить", command=self.enable_selected_printers).pack(side="left", padx=(8, 3))
+        ttk.Button(toolbar, text="Выключить", command=self.disable_selected_printers).pack(side="left", padx=3)
+        ttk.Button(toolbar, text="↑ Выше", command=lambda: self.move_selected_printers(-1)).pack(side="left", padx=(8, 3))
+        ttk.Button(toolbar, text="↓ Ниже", command=lambda: self.move_selected_printers(1)).pack(side="left", padx=3)
         ttk.Label(
-            toolbar, text="Изменения вступят в силу после перезапуска ретранслятора.",
+            toolbar, text="Ctrl/Shift — выбор нескольких • Alt+↑/↓ — порядок",
             foreground="#666666",
         ).pack(side="right")
         self.printer_config_tree = self._tree(
@@ -411,7 +414,10 @@ class PrintRoundRobinApp:
             ("Участвует", "Название", "IP-адрес", "RAW TCP-порт"),
             (100, 250, 190, 130),
         )
+        self.printer_config_tree.configure(selectmode="extended")
         self.printer_config_tree.bind("<Double-1>", lambda _event: self.edit_printer())
+        self.printer_config_tree.bind("<Alt-Up>", self._move_selected_up_key)
+        self.printer_config_tree.bind("<Alt-Down>", self._move_selected_down_key)
 
     def _build_settings(self):
         frame = ttk.Frame(self.settings_tab)
@@ -633,24 +639,45 @@ class PrintRoundRobinApp:
         except Exception as exc:
             messagebox.showerror("Экспорт", str(exc), parent=self.root)
 
-    def _refresh_printer_config_tree(self):
+    def _refresh_printer_config_tree(self, selected_hosts: set[str] | None = None):
         if not hasattr(self, "printer_config_tree"):
             return
         for item in self.printer_config_tree.get_children():
             self.printer_config_tree.delete(item)
+        selected_ids = []
         for index, printer in enumerate(self.config.printers):
+            item_id = str(index)
             self.printer_config_tree.insert(
-                "", "end", iid=str(index),
+                "", "end", iid=item_id,
                 values=("Да" if printer.enabled else "Нет", printer.name, printer.host, printer.port),
             )
+            if selected_hosts and printer.host in selected_hosts:
+                selected_ids.append(item_id)
+        if selected_ids:
+            self.printer_config_tree.selection_set(*selected_ids)
+            self.printer_config_tree.focus(selected_ids[0])
+            self.printer_config_tree.see(selected_ids[0])
         self._rebuild_printer_cards()
 
-    def _selected_printer_index(self) -> int | None:
+    def _selected_printer_indices(self, warn: bool = True) -> list[int]:
         selected = self.printer_config_tree.selection()
         if not selected:
-            messagebox.showwarning("Принтеры", "Сначала выберите принтер в таблице.", parent=self.root)
+            if warn:
+                messagebox.showwarning("Принтеры", "Сначала выберите принтеры в таблице.", parent=self.root)
+            return []
+        return sorted(int(item) for item in selected)
+
+    def _selected_printer_index(self) -> int | None:
+        indices = self._selected_printer_indices()
+        if not indices:
             return None
-        return int(selected[0])
+        if len(indices) != 1:
+            messagebox.showwarning(
+                "Принтеры", "Для редактирования выберите только один принтер.",
+                parent=self.root,
+            )
+            return None
+        return indices[0]
 
     def _ensure_engine_stopped(self) -> bool:
         if self.engine and self.engine.running:
@@ -668,7 +695,7 @@ class PrintRoundRobinApp:
                 messagebox.showerror("Принтеры", "Такой IP-адрес уже добавлен.", parent=self.root)
                 return
             self.config.printers.append(dialog.result)
-            self._refresh_printer_config_tree()
+            self._refresh_printer_config_tree(selected_hosts={dialog.result.host})
 
     def edit_printer(self):
         if not self._ensure_engine_stopped():
@@ -683,34 +710,95 @@ class PrintRoundRobinApp:
                 messagebox.showerror("Принтеры", "Такой IP-адрес уже добавлен.", parent=self.root)
                 return
             self.config.printers[index] = dialog.result
-            self._refresh_printer_config_tree()
+            self._refresh_printer_config_tree(selected_hosts={dialog.result.host})
 
     def delete_printer(self):
         if not self._ensure_engine_stopped():
             return
-        index = self._selected_printer_index()
-        if index is None:
+        indices = self._selected_printer_indices()
+        if not indices:
             return
-        if len(self.config.printers) <= 1:
-            messagebox.showwarning("Принтеры", "Нельзя удалить последний принтер.", parent=self.root)
+        selected_set = set(indices)
+        remaining = [
+            printer for index, printer in enumerate(self.config.printers)
+            if index not in selected_set
+        ]
+        if not remaining:
+            messagebox.showwarning("Принтеры", "Нельзя удалить все принтеры. Оставьте хотя бы один.", parent=self.root)
             return
-        printer = self.config.printers[index]
-        if messagebox.askyesno("Удаление", f"Удалить {printer.name} ({printer.host})?", parent=self.root):
-            self.config.printers.pop(index)
+        if not any(printer.enabled for printer in remaining):
+            messagebox.showwarning(
+                "Принтеры",
+                "После удаления должен остаться хотя бы один включённый принтер. "
+                "Сначала включите устройство, которое хотите сохранить.",
+                parent=self.root,
+            )
+            return
+        names = "\n".join(
+            f"• {self.config.printers[index].name} ({self.config.printers[index].host})"
+            for index in indices
+        )
+        if messagebox.askyesno(
+            "Удаление принтеров",
+            f"Удалить выбранные устройства ({len(indices)}):\n\n{names}?",
+            parent=self.root,
+        ):
+            self.config.printers = remaining
             self._refresh_printer_config_tree()
 
-    def toggle_printer(self):
+    def enable_selected_printers(self):
         if not self._ensure_engine_stopped():
             return
-        index = self._selected_printer_index()
-        if index is None:
+        indices = self._selected_printer_indices()
+        if not indices:
             return
-        item = self.config.printers[index]
-        item.enabled = not item.enabled
-        if not any(p.enabled for p in self.config.printers):
-            item.enabled = True
-            messagebox.showwarning("Принтеры", "Должен быть включён хотя бы один принтер.", parent=self.root)
-        self._refresh_printer_config_tree()
+        selected_hosts = {self.config.printers[index].host for index in indices}
+        for index in indices:
+            self.config.printers[index].enabled = True
+        self._refresh_printer_config_tree(selected_hosts=selected_hosts)
+
+    def disable_selected_printers(self):
+        if not self._ensure_engine_stopped():
+            return
+        indices = self._selected_printer_indices()
+        if not indices:
+            return
+        selected_set = set(indices)
+        remaining_enabled = any(
+            printer.enabled and index not in selected_set
+            for index, printer in enumerate(self.config.printers)
+        )
+        if not remaining_enabled:
+            messagebox.showwarning(
+                "Принтеры", "Нельзя выключить все устройства. Оставьте хотя бы один принтер включённым.",
+                parent=self.root,
+            )
+            return
+        selected_hosts = {self.config.printers[index].host for index in indices}
+        for index in indices:
+            self.config.printers[index].enabled = False
+        self._refresh_printer_config_tree(selected_hosts=selected_hosts)
+
+    def move_selected_printers(self, direction: int):
+        if not self._ensure_engine_stopped():
+            return
+        indices = self._selected_printer_indices()
+        if not indices:
+            return
+        selected_hosts = {self.config.printers[index].host for index in indices}
+        reordered = reorder_printers(self.config.printers, selected_hosts, direction)
+        if [p.host for p in reordered] == [p.host for p in self.config.printers]:
+            return
+        self.config.printers = reordered
+        self._refresh_printer_config_tree(selected_hosts=selected_hosts)
+
+    def _move_selected_up_key(self, _event):
+        self.move_selected_printers(-1)
+        return "break"
+
+    def _move_selected_down_key(self, _event):
+        self.move_selected_printers(1)
+        return "break"
 
     def refresh_drivers(self):
         self.windows_status_var.set("Получение списка драйверов Windows...")

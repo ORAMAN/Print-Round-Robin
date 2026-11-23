@@ -159,6 +159,12 @@ class PrintRoundRobinApp:
         self._build_style()
         self._build_ui()
         self._load_config_to_controls()
+        if self.config.start_with_windows and os.name == "nt":
+            try:
+                # Replace an older Run entry that may still contain --minimized.
+                windows.register_startup(True, minimized=False)
+            except Exception as exc:
+                self.logger.warning("Не удалось обновить команду автозапуска: %s", exc)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         self.root.after(150, self._poll_events)
         self.root.after(250, self._poll_logs)

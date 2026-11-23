@@ -932,12 +932,14 @@ class PrintRoundRobinApp:
 
         has_critical = any(item.get("severity") == "critical" for item in errors)
         has_warning = any(item.get("severity") == "warning" for item in errors)
-        if tcp_down:
+        if tcp_down and snmp_available is not True:
             state, title = "offline", "НЕТ СВЯЗИ"
         elif has_critical:
             state, title = "error", "КРИТИЧЕСКАЯ ОШИБКА"
         elif has_warning:
             state, title = "warning", "ПРЕДУПРЕЖДЕНИЕ"
+        elif tcp_down and snmp_available is True:
+            state, title = "warning", "RAW-ПОРТ НЕДОСТУПЕН"
         elif current_job:
             state, title = "transfer", "ПЕРЕДАЁТ ЗАДАНИЕ"
         elif self.config.snmp_enabled and snmp_available is False:
@@ -960,8 +962,10 @@ class PrintRoundRobinApp:
             state, title = "unknown", "СЕТЬ ДОСТУПНА"
 
         error_texts = [str(item.get("text", "")).strip() for item in errors if item.get("text")]
-        if tcp_down:
-            detail = "TCP-порт принтера недоступен"
+        if tcp_down and snmp_available is not True:
+            detail = "Нет ответа от RAW TCP и SNMP"
+        elif tcp_down and snmp_available is True:
+            detail = "Устройство отвечает по SNMP, но RAW TCP-порт печати недоступен"
         elif error_texts:
             detail = "  •  ".join(error_texts[:2])
             if len(error_texts) > 2:
@@ -990,8 +994,8 @@ class PrintRoundRobinApp:
         if consumable_warnings:
             toner_text = "  •  ".join(consumable_warnings[:2])
 
-        network_text = "TCP: нет связи" if tcp_down else (
-            "TCP: OK" if row.get("status") == "Доступен" else "TCP: проверка"
+        network_text = "RAW: нет ответа" if tcp_down else (
+            "RAW: OK" if row.get("status") == "Доступен" else "RAW: проверка"
         )
         if not self.config.snmp_enabled:
             snmp_text = "SNMP: выкл."

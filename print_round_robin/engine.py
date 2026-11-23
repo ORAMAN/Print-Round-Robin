@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Callable
 
 from .config import AppConfig, PrinterConfig, LEGACY_DIR, runtime_dir, load_legacy_next_index
+from .snmp_monitor import poll_printer
 
 LOG = logging.getLogger("PrintRoundRobin")
 
@@ -52,6 +53,9 @@ class PrinterRuntime:
     jobs_sent: int = 0
     current_job: str = ""
     last_error: str = ""
+    device_status: dict | None = None
+    snmp_available: bool | None = None
+    snmp_error: str = ""
 
 
 class RoundRobinEngine:
@@ -74,6 +78,7 @@ class RoundRobinEngine:
         self._server: socket.socket | None = None
         self._accept_thread: threading.Thread | None = None
         self._health_thread: threading.Thread | None = None
+        self._snmp_thread: threading.Thread | None = None
         self._receiver_slots = threading.BoundedSemaphore(config.max_receivers)
         self._worker_threads: list[threading.Thread] = []
         self._workers_queue: queue.Queue[tuple[Path, str]] = queue.Queue()
@@ -160,6 +165,11 @@ class RoundRobinEngine:
             )
             self._accept_thread.start()
             self._health_thread.start()
+            if self.config.snmp_enabled:
+                self._snmp_thread = threading.Thread(
+                    target=self._snmp_loop, name="PrintRelay-SNMP", daemon=True
+                )
+                self._snmp_thread.start()
             LOG.info(
                 "Ретранслятор запущен: %s:%d; принтеров: %d; рабочих потоков: %d",
                 self.config.listener_host, self.config.listener_port,
@@ -190,7 +200,7 @@ class RoundRobinEngine:
                     client.close()
                 except OSError:
                     pass
-            for thread in [self._accept_thread, self._health_thread, *receivers, *self._worker_threads]:
+            for thread in [self._accept_thread, self._health_thread, self._snmp_thread, *receivers, *self._worker_threads]:
                 if thread and thread.is_alive():
                     thread.join(timeout=wait_seconds)
             self._started = False
@@ -535,6 +545,44 @@ class RoundRobinEngine:
             self._emit_printer_status()
             self._stop.wait(self.config.health_interval)
 
+    def _snmp_loop(self) -> None:
+        """Poll all printers concurrently via SNMP without blocking print workers."""
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        hosts = [p for p in self.config.printers if p.enabled]
+        with ThreadPoolExecutor(max_workers=min(10, len(hosts) or 1), thread_name_prefix="PrinterSNMP") as pool:
+            while not self._stop.is_set():
+                future_map = {
+                    pool.submit(
+                        poll_printer,
+                        printer.host,
+                        self.config.snmp_community,
+                        self.config.snmp_port,
+                        self.config.snmp_timeout,
+                        self.config.snmp_version,
+                    ): printer
+                    for printer in hosts
+                }
+                for future in as_completed(future_map):
+                    if self._stop.is_set():
+                        return
+                    printer = future_map[future]
+                    runtime = self._printer_runtime[printer.host]
+                    try:
+                        result = future.result()
+                        runtime.device_status = result
+                        runtime.snmp_available = True
+                        runtime.snmp_error = ""
+                    except Exception as exc:
+                        runtime.snmp_available = False
+                        runtime.snmp_error = str(exc)
+                        # Preserve last good SNMP data only for diagnostics; mark it stale.
+                        if runtime.device_status:
+                            runtime.device_status = dict(runtime.device_status)
+                            runtime.device_status["stale"] = True
+                    self._emit_printer_status()
+                self._stop.wait(self.config.snmp_interval)
+
     def _emit_printer_status(self) -> None:
         rows = []
         for host, runtime in self._printer_runtime.items():
@@ -548,6 +596,9 @@ class RoundRobinEngine:
                 "status": status, "busy": runtime.busy, "available": runtime.available,
                 "jobs_sent": runtime.jobs_sent, "current_job": runtime.current_job,
                 "last_error": runtime.last_error, "checked_at": runtime.checked_at,
+                "device_status": runtime.device_status,
+                "snmp_available": runtime.snmp_available,
+                "snmp_error": runtime.snmp_error,
             })
         self._emit("printers", printers=rows)
 
@@ -578,6 +629,9 @@ class RoundRobinEngine:
                               "Недоступен" if runtime.available is False else "Проверка...",
                     "jobs_sent": runtime.jobs_sent, "current_job": runtime.current_job,
                     "last_error": runtime.last_error,
+                    "device_status": runtime.device_status,
+                    "snmp_available": runtime.snmp_available,
+                    "snmp_error": runtime.snmp_error,
                 }
                 for host, runtime in self._printer_runtime.items()
             ],

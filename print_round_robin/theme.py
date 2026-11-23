@@ -1,57 +1,60 @@
 # -*- coding: utf-8 -*-
-"""Light/dark visual system based on FaceSearch loaders/ui_theme.py."""
+"""Light/dark palettes matched to the FaceSearch HTTP server theme."""
 from __future__ import annotations
 
 import tkinter as tk
 from tkinter import ttk
 
 
+# Values follow the CSS variables in FaceSearch/server_http.py:
+# dark:  #151515 / #242424 / #383838 / #eeeeee / #167ac6
+# light: #f4f5f7 / #ffffff / #c8cfd8 / #202124 / #1479c9
 THEME_PALETTES = {
     "light": {
-        "app": "#F2F5F9", "panel": "#F8FAFD", "white": "#FFFFFF",
-        "text": "#202B3C", "muted": "#627187", "border": "#D7E0EB",
-        "accent": "#0077FF", "accent_active": "#0066DE",
-        "accent_disabled": "#9ABFF0", "accent_text": "#FFFFFF",
-        "danger_bg": "#FDECEC", "danger_text": "#B42318", "danger_border": "#F5C5C5",
-        "selection": "#C9E1FF", "button": "#E5ECF5", "button_active": "#DCE8F6",
-        "button_pressed": "#D5E1EF", "button_disabled": "#E9EEF5",
-        "disabled_text": "#99A4B4", "progress_track": "#DFE7F1", "scrollbar": "#D7E0EB",
+        "app": "#f4f5f7", "panel": "#ffffff", "white": "#ffffff",
+        "text": "#202124", "muted": "#62666b", "border": "#c8cfd8",
+        "accent": "#1479c9", "accent_active": "#1068ad",
+        "accent_disabled": "#9fc5e4", "accent_text": "#ffffff",
+        "danger_bg": "#fcebea", "danger_text": "#9b2c2c", "danger_border": "#e4aaaa",
+        "selection": "#d5e8f8", "button": "#e5e7eb", "button_active": "#d1d5db",
+        "button_pressed": "#c8cdd4", "button_disabled": "#eceef1",
+        "disabled_text": "#92979e", "progress_track": "#e9eaec", "scrollbar": "#c8cfd8",
     },
     "dark": {
-        "app": "#1C2026", "panel": "#252A31", "white": "#30363F",
-        "text": "#E7EAF0", "muted": "#A8B0BC", "border": "#424A55",
-        "accent": "#2D77D4", "accent_active": "#2465BA",
-        "accent_disabled": "#3E5876", "accent_text": "#FFFFFF",
-        "danger_bg": "#482D32", "danger_text": "#FFB4AB", "danger_border": "#704148",
-        "selection": "#3C5879", "button": "#363D47", "button_active": "#454E5B",
-        "button_pressed": "#2E343D", "button_disabled": "#2B3037",
-        "disabled_text": "#77818E", "progress_track": "#343B45", "scrollbar": "#454E5B",
+        "app": "#151515", "panel": "#242424", "white": "#1c1c1c",
+        "text": "#eeeeee", "muted": "#aaaaaa", "border": "#383838",
+        "accent": "#167ac6", "accent_active": "#1268a9",
+        "accent_disabled": "#496b87", "accent_text": "#ffffff",
+        "danger_bg": "#3e2323", "danger_text": "#ffc1bd", "danger_border": "#704040",
+        "selection": "#244765", "button": "#333333", "button_active": "#444444",
+        "button_pressed": "#292929", "button_disabled": "#252525",
+        "disabled_text": "#777777", "progress_track": "#333333", "scrollbar": "#383838",
     },
 }
 
 
-# Status colors are deliberately independent of the accent color, but change
-# luminance/background contrast between themes (same approach as FaceSearch).
+# Status cards use the same neutral surfaces and muted accent family as the
+# FaceSearch server, with semantic colors retained for operational states.
 STATUS_PALETTES = {
     "light": {
-        "ready":    {"bg": "#E8F5EC", "border": "#27934D", "text": "#176534", "dot": "#218C4C", "title": "#12522B"},
-        "printing": {"bg": "#E7F0FF", "border": "#2878D0", "text": "#1554A0", "dot": "#2878D0", "title": "#123F7C"},
-        "transfer": {"bg": "#E5F4FF", "border": "#1686B7", "text": "#075B80", "dot": "#1686B7", "title": "#064A68"},
-        "warning":  {"bg": "#FFF5DA", "border": "#D99A15", "text": "#855B00", "dot": "#D99A15", "title": "#704900"},
-        "error":    {"bg": "#FDECEC", "border": "#D33A32", "text": "#A51F19", "dot": "#D33A32", "title": "#821811"},
-        "offline":  {"bg": "#EDF0F4", "border": "#7C8796", "text": "#526070", "dot": "#7C8796", "title": "#3F4A59"},
-        "warmup":   {"bg": "#F0E9FF", "border": "#8B5AD0", "text": "#6236A5", "dot": "#8B5AD0", "title": "#4E288A"},
-        "unknown":  {"bg": "#EEF2F7", "border": "#9AA7B7", "text": "#5D6A7B", "dot": "#9AA7B7", "title": "#4A5665"},
+        "ready":    {"bg": "#eaf5ee", "border": "#359b67", "text": "#155b35", "dot": "#218c52", "title": "#174d31"},
+        "printing": {"bg": "#eaf3fb", "border": "#1479c9", "text": "#0b568f", "dot": "#1479c9", "title": "#104c7b"},
+        "transfer": {"bg": "#e7f4fb", "border": "#1685a8", "text": "#075b75", "dot": "#1685a8", "title": "#07506a"},
+        "warning":  {"bg": "#fff3dc", "border": "#d49a32", "text": "#805700", "dot": "#d49a32", "title": "#805700"},
+        "error":    {"bg": "#fcebea", "border": "#c83e3e", "text": "#9b2c2c", "dot": "#c83e3e", "title": "#872929"},
+        "offline":  {"bg": "#e9eaec", "border": "#aab4c0", "text": "#62666b", "dot": "#8b929a", "title": "#45494e"},
+        "warmup":   {"bg": "#f0eafa", "border": "#8b5cf6", "text": "#5b3a91", "dot": "#8b5cf6", "title": "#4e327d"},
+        "unknown":  {"bg": "#ffffff", "border": "#aab4c0", "text": "#62666b", "dot": "#94a3b8", "title": "#202124"},
     },
     "dark": {
-        "ready":    {"bg": "#203B2B", "border": "#49B675", "text": "#A5E8BD", "dot": "#5BD18A", "title": "#C4F5D4"},
-        "printing": {"bg": "#203650", "border": "#5B9DE5", "text": "#B7D8FF", "dot": "#69ADFF", "title": "#D2E7FF"},
-        "transfer": {"bg": "#1D3B49", "border": "#48B2D4", "text": "#B1E8F5", "dot": "#55C6E4", "title": "#D2F5FC"},
-        "warning":  {"bg": "#47391F", "border": "#E5B64D", "text": "#FFE2A0", "dot": "#F2C45D", "title": "#FFEDC3"},
-        "error":    {"bg": "#48282D", "border": "#F07676", "text": "#FFC1BD", "dot": "#FF7777", "title": "#FFD5D1"},
-        "offline":  {"bg": "#30363E", "border": "#8793A1", "text": "#C4CBD4", "dot": "#9BA6B4", "title": "#E0E5EC"},
-        "warmup":   {"bg": "#392D4D", "border": "#B18AE6", "text": "#DDC6FF", "dot": "#B992F2", "title": "#EBDFFF"},
-        "unknown":  {"bg": "#30363E", "border": "#687586", "text": "#C0C8D3", "dot": "#8995A5", "title": "#DEE4EC"},
+        "ready":    {"bg": "#1b3025", "border": "#359b67", "text": "#a8dfbd", "dot": "#4ab47b", "title": "#d0f0dc"},
+        "printing": {"bg": "#1b3044", "border": "#167ac6", "text": "#b7d8ff", "dot": "#5ba7e6", "title": "#d2e7ff"},
+        "transfer": {"bg": "#1a3038", "border": "#1685a8", "text": "#b1e8f5", "dot": "#38b6d7", "title": "#d2f5fc"},
+        "warning":  {"bg": "#3b301d", "border": "#d49a32", "text": "#ffe0a1", "dot": "#e5b04d", "title": "#ffedc3"},
+        "error":    {"bg": "#3e2323", "border": "#c83e3e", "text": "#ffb8b8", "dot": "#e05a5a", "title": "#ffd5d1"},
+        "offline":  {"bg": "#242424", "border": "#626b76", "text": "#aaaaaa", "dot": "#94a3b8", "title": "#eeeeee"},
+        "warmup":   {"bg": "#30253d", "border": "#8b5cf6", "text": "#dbc5ff", "dot": "#a78bfa", "title": "#eee1ff"},
+        "unknown":  {"bg": "#242424", "border": "#626b76", "text": "#eeeeee", "dot": "#94a3b8", "title": "#eeeeee"},
     },
 }
 
@@ -93,29 +96,42 @@ class ThemeManager:
         s.configure("Title.TLabel", background=p["app"], foreground=p["text"], font=("Segoe UI", 17, "bold"))
         s.configure("Metric.TLabel", background=p["panel"], foreground=p["text"], font=("Segoe UI", 19, "bold"))
         s.configure("TButton", background=p["button"], foreground=p["text"], padding=(11, 7), relief="flat")
-        s.map("TButton", background=[("disabled", p["button_disabled"]), ("pressed", p["button_pressed"]), ("active", p["button_active"])],
-              foreground=[("disabled", p["disabled_text"])])
-        s.configure("Accent.TButton", background=p["accent"], foreground=p["accent_text"],
-                    padding=(14, 8), font=("Segoe UI", 10, "bold"), relief="flat")
+        s.map(
+            "TButton",
+            background=[("disabled", p["button_disabled"]), ("pressed", p["button_pressed"]), ("active", p["button_active"])],
+            foreground=[("disabled", p["disabled_text"])],
+        )
+        s.configure(
+            "Accent.TButton", background=p["accent"], foreground=p["accent_text"],
+            padding=(14, 8), font=("Segoe UI", 10, "bold"), relief="flat",
+        )
         s.map("Accent.TButton", background=[("disabled", p["accent_disabled"]), ("pressed", p["accent_active"]), ("active", p["accent_active"])])
-        s.configure("Danger.TButton", background=p["danger_bg"], foreground=p["danger_text"],
-                    padding=(14, 8), relief="flat")
-        s.configure("TEntry", fieldbackground=p["white"], foreground=p["text"], insertcolor=p["text"],
-                    bordercolor=p["border"], lightcolor=p["border"], darkcolor=p["border"], padding=5)
-        s.configure("TCombobox", fieldbackground=p["white"], foreground=p["text"],
-                    background=p["button"], arrowcolor=p["text"], bordercolor=p["border"])
-        s.map("TCombobox", fieldbackground=[("readonly", p["white"])])
+        s.configure(
+            "Danger.TButton", background=p["danger_bg"], foreground=p["danger_text"],
+            padding=(14, 8), relief="flat",
+        )
+        s.map("Danger.TButton", background=[("active", p["danger_border"])])
+        s.configure(
+            "TEntry", fieldbackground=p["white"], foreground=p["text"], insertcolor=p["text"],
+            bordercolor=p["border"], lightcolor=p["border"], darkcolor=p["border"], padding=5,
+        )
+        s.configure(
+            "TCombobox", fieldbackground=p["white"], foreground=p["text"],
+            background=p["button"], arrowcolor=p["text"], bordercolor=p["border"],
+        )
+        s.map("TCombobox", fieldbackground=[("readonly", p["white"])], foreground=[("readonly", p["text"])])
         s.configure("TNotebook", background=p["app"], bordercolor=p["border"])
         s.configure("TNotebook.Tab", background=p["button"], foreground=p["text"], padding=(12, 7))
         s.map("TNotebook.Tab", background=[("selected", p["panel"]), ("active", p["button_active"])])
-        s.configure("Treeview", background=p["white"], fieldbackground=p["white"], foreground=p["text"],
-                    rowheight=27, bordercolor=p["border"])
-        s.configure("Treeview.Heading", background=p["button"], foreground=p["text"],
-                    font=("Segoe UI", 9, "bold"))
+        s.configure(
+            "Treeview", background=p["white"], fieldbackground=p["white"], foreground=p["text"],
+            rowheight=27, bordercolor=p["border"],
+        )
+        s.configure("Treeview.Heading", background=p["button"], foreground=p["text"], font=("Segoe UI", 9, "bold"))
         s.map("Treeview", background=[("selected", p["selection"])], foreground=[("selected", p["text"])])
         s.configure("TCheckbutton", background=p["panel"], foreground=p["text"])
-        s.configure("TProgressbar", troughcolor=p["progress_track"], background=p["accent"],
-                    bordercolor=p["progress_track"])
+        s.map("TCheckbutton", foreground=[("disabled", p["disabled_text"])])
+        s.configure("TProgressbar", troughcolor=p["progress_track"], background=p["accent"], bordercolor=p["progress_track"])
         s.configure("TScrollbar", background=p["scrollbar"], troughcolor=p["app"], bordercolor=p["app"])
         self._recolor_native(self.root)
 
@@ -123,8 +139,12 @@ class ThemeManager:
         p = self.palette
         try:
             if isinstance(widget, tk.Text):
-                widget.configure(bg=p["white"], fg=p["text"], insertbackground=p["text"],
-                                 selectbackground=p["selection"], highlightbackground=p["border"])
+                widget.configure(
+                    bg=p["white"], fg=p["text"], insertbackground=p["text"],
+                    selectbackground=p["selection"], highlightbackground=p["border"],
+                )
+            elif isinstance(widget, tk.Label):
+                widget.configure(bg=p["panel"], fg=p["text"])
             elif isinstance(widget, tk.Frame):
                 widget.configure(bg=p["panel"])
             for child in widget.winfo_children():

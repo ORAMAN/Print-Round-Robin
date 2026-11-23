@@ -1482,7 +1482,7 @@ class PrintRoundRobinApp:
         elif snmp_available is False:
             detail = "Сеть доступна, но SNMP не отвечает. Проверьте SNMP v1/v2c и community."
         elif device:
-            detail = "Активных предупреждений нет"
+            detail = device.get("status_message") or "Активных предупреждений нет"
         else:
             detail = "Ожидание данных состояния устройства"
 
@@ -1647,6 +1647,14 @@ class PrintRoundRobinApp:
         ]
         if device:
             lines.append(f"Состояние устройства: {device.get('state_text', device.get('state', 'неизвестно'))}")
+            if device.get("status_message"):
+                lines.append(f"Сообщение на дисплее: {device['status_message']}")
+            if device.get("serial_number"):
+                lines.append(f"Серийный номер: {device['serial_number']}")
+            if device.get("snmp_version_used"):
+                lines.append(f"SNMP: v{device['snmp_version_used']}")
+            if device.get("identity_oid"):
+                lines.append(f"OID идентификации: {device['identity_oid']}")
             if device.get("stale"):
                 lines.append("ВНИМАНИЕ: это последнее сохранённое состояние; текущий опрос SNMP не отвечает.")
             lines.append(f"SNMP-имя: {device.get('name', '—')}")

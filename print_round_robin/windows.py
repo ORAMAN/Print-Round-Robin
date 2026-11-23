@@ -174,7 +174,7 @@ def stop_legacy_scheduled_task(task_name: str = "Kyocera Round Robin Relay", rem
     return run_powershell(script, timeout=30)
 
 
-def register_startup(enabled: bool, minimized: bool = True) -> None:
+def register_startup(enabled: bool, minimized: bool = False) -> None:
     _require_windows()
     import winreg
 

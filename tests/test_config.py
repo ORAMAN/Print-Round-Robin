@@ -126,8 +126,15 @@ def test_network_share_settings_round_trip(tmp_path):
 
 def test_invalid_printer_share_name_is_rejected():
     config = AppConfig(share_enabled=True, share_name="Kyocera/Office")
-    with pytest.raises(ValueError, match="недопустимые символы"):
+    with pytest.raises(ValueError, match="не более 31 символа"):
         config.validate()
+
+
+def test_printer_share_name_rejects_spaces_and_long_names():
+    with pytest.raises(ValueError, match="не более 31 символа"):
+        AppConfig(share_name="Kyocera Office").validate()
+    with pytest.raises(ValueError, match="не более 31 символа"):
+        AppConfig(share_name="K" * 32).validate()
 
 
 def test_invalid_printer_share_server_is_rejected():

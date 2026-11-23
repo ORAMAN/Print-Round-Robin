@@ -85,15 +85,16 @@ class AppConfig:
         self.share_enabled = bool(self.share_enabled)
         self.share_name = str(self.share_name).strip()
         self.share_server = str(self.share_server).strip()
-        invalid_share_chars = '\\/:*?"<>|'
-        if len(self.share_name) > 80 or any(ch in self.share_name for ch in invalid_share_chars):
+        if len(self.share_name) > 80 or any(
+            not (ch.isalnum() or ch in " _-.") for ch in self.share_name
+        ):
             raise ValueError("Имя сетевого ресурса принтера содержит недопустимые символы или длиннее 80 знаков.")
         if self.share_name.endswith((".", " ")):
             raise ValueError("Имя сетевого ресурса принтера не должно заканчиваться точкой или пробелом.")
         if self.share_enabled and not self.share_name:
             raise ValueError("Укажите имя сетевого ресурса для публикации принтера.")
-        if any(ch in self.share_server for ch in '\\/:*?"<>|'):
-            raise ValueError("Имя сервера должно быть именем компьютера, DNS-именем или IPv4-адресом без обратных слешей.")
+        if any(not (ch.isalnum() or ch in ".-_") for ch in self.share_server):
+            raise ValueError("Имя сервера должно содержать только буквы, цифры, точку, дефис или подчёркивание.")
         if not self.queue_name:
             raise ValueError("Не задано имя виртуального принтера.")
         if not self.port_name:

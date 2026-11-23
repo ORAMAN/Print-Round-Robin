@@ -159,11 +159,11 @@ def decode_message(packet: bytes) -> tuple[int, int, list[VarBind]]:
     request_id = _decode_integer(request_raw)
     error_status = _decode_integer(error_raw)
     _error_index = _decode_integer(index_raw)
-    _, varlist, _ = _read_tlv(bindings_raw, 0)
+    # bindings_raw is already the content of the VarBindList SEQUENCE.
     cursor = 0
     bindings: list[VarBind] = []
-    while cursor < len(varlist):
-        item_tag, item, cursor = _read_tlv(varlist, cursor)
+    while cursor < len(bindings_raw):
+        item_tag, item, cursor = _read_tlv(bindings_raw, cursor)
         if item_tag != 0x30:
             raise SnmpError("Некорректная запись VarBind.")
         pos = 0

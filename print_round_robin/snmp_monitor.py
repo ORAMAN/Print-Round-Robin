@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import secrets
 import socket
+import threading
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -246,6 +247,8 @@ HR_DEVICE_STATUS = "1.3.6.1.2.1.25.3.2.1.5"
 HR_PRINTER_STATUS = "1.3.6.1.2.1.25.3.5.1.1"
 HR_PRINTER_ERRORS = "1.3.6.1.2.1.25.3.5.1.2"
 SYS_NAME = "1.3.6.1.2.1.1.5.0"
+_VERSION_CACHE: dict[tuple[str, str, int, str], str] = {}
+_VERSION_CACHE_LOCK = threading.Lock()
 # Printer-MIB fields also queried by the user's working OLEPRN/VBA code.
 PRT_GENERAL_SERIAL_NUMBER = "1.3.6.1.2.1.43.5.1.1.17"
 PRT_CONSOLE_DISPLAY_TEXT = "1.3.6.1.2.1.43.16.5.1.2"
@@ -371,11 +374,20 @@ def _make_client_for_printer(host: str, community: str, port: int,
     """Try the configured SNMP version first, then the other community-based version."""
     preferred = "1" if str(version).lower() in ("1", "v1") else "2c"
     other = "2c" if preferred == "1" else "1"
+    cache_key = (str(host), str(community), int(port), preferred)
+    with _VERSION_CACHE_LOCK:
+        cached_version = _VERSION_CACHE.get(cache_key)
+    candidates = (
+        (cached_version, other) if cached_version in ("1", "2c")
+        else (preferred, other)
+    )
     errors: list[str] = []
-    for candidate_version in (preferred, other):
+    for candidate_version in candidates:
         client = SnmpClient(host, community, port, timeout, candidate_version)
         identity, identity_oid = _discover_printer_identity(client)
         if identity is not None:
+            with _VERSION_CACHE_LOCK:
+                _VERSION_CACHE[cache_key] = candidate_version
             return client, identity, identity_oid
         errors.append(f"SNMPv{candidate_version}: не получен ответ на OID hrDeviceDescr/sysName")
     raise SnmpError(

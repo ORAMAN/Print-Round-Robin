@@ -411,10 +411,11 @@ class PrintRoundRobinApp:
         frame.pack(anchor="nw", fill="both", expand=True)
         self.setting_vars = {}
         for row, (key, title, _kind) in enumerate(self.SETTINGS_FIELDS):
-            ttk.Label(frame, text=title).grid(row=row, column=0, sticky="w", padx=(0, 15), pady=5)
+            ttk.Label(frame, text=title).grid(row=row, column=0, sticky="w", padx=(0, 15), pady=4)
             value = tk.StringVar()
             self.setting_vars[key] = value
-            ttk.Entry(frame, textvariable=value, width=36).grid(row=row, column=1, sticky="w", pady=5)
+            ttk.Entry(frame, textvariable=value, width=36).grid(row=row, column=1, sticky="w", pady=4)
+
         row = len(self.SETTINGS_FIELDS)
         self.auto_start_var = tk.BooleanVar()
         self.windows_startup_var = tk.BooleanVar()
@@ -426,12 +427,43 @@ class PrintRoundRobinApp:
             frame, text="Запускать программу при входе в Windows (сворачивать в панель задач)",
             variable=self.windows_startup_var,
         ).grid(row=row + 1, column=0, columnspan=2, sticky="w", pady=4)
+
+        snmp_box = ttk.LabelFrame(frame, text="Мониторинг состояния принтеров (SNMP)", padding=10)
+        snmp_box.grid(row=row + 2, column=0, columnspan=3, sticky="ew", pady=(12, 8))
+        self.snmp_enabled_var = tk.BooleanVar()
+        ttk.Checkbutton(
+            snmp_box, text="Получать состояние принтера: бумага, замятия, тонер, крышки, обслуживание",
+            variable=self.snmp_enabled_var,
+        ).grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 8))
+        ttk.Label(snmp_box, text="Версия").grid(row=1, column=0, sticky="w", padx=(0, 6))
+        self.snmp_version_var = tk.StringVar()
+        ttk.Combobox(snmp_box, textvariable=self.snmp_version_var, values=("2c", "1"),
+                     state="readonly", width=7).grid(row=1, column=1, sticky="w", padx=(0, 16))
+        ttk.Label(snmp_box, text="Community (read)").grid(row=1, column=2, sticky="w", padx=(0, 6))
+        self.snmp_community_var = tk.StringVar()
+        ttk.Entry(snmp_box, textvariable=self.snmp_community_var, width=18).grid(row=1, column=3, sticky="w")
+        ttk.Label(snmp_box, text="UDP-порт").grid(row=2, column=0, sticky="w", pady=(7, 0))
+        self.snmp_port_var = tk.StringVar()
+        ttk.Entry(snmp_box, textvariable=self.snmp_port_var, width=9).grid(row=2, column=1, sticky="w", pady=(7, 0))
+        ttk.Label(snmp_box, text="Таймаут, с").grid(row=2, column=2, sticky="w", pady=(7, 0))
+        self.snmp_timeout_var = tk.StringVar()
+        ttk.Entry(snmp_box, textvariable=self.snmp_timeout_var, width=9).grid(row=2, column=3, sticky="w", pady=(7, 0))
+        ttk.Label(snmp_box, text="Интервал опроса, с").grid(row=3, column=0, sticky="w", pady=(7, 0))
+        self.snmp_interval_var = tk.StringVar()
+        ttk.Entry(snmp_box, textvariable=self.snmp_interval_var, width=9).grid(row=3, column=1, sticky="w", pady=(7, 0))
+        ttk.Label(
+            snmp_box,
+            text=("SNMP read-only. Для устройств обычно требуется включить SNMP v1/v2c в веб-интерфейсе Kyocera. "
+                  "По умолчанию community — public; при отключённом SNMP будут показываться только доступность TCP "
+                  "и задания, но не аппаратные ошибки."),
+            wraplength=920, justify="left", foreground="#777777",
+        ).grid(row=4, column=0, columnspan=4, sticky="w", pady=(9, 0))
+
         ttk.Label(
             frame,
             text="Программа должна оставаться запущенной, пока требуется печать через виртуальную очередь.",
-            foreground="#666666", wraplength=850,
-        ).grid(row=row + 2, column=0, columnspan=2, sticky="w", pady=(12, 0))
-
+            foreground="#777777", wraplength=920,
+        ).grid(row=row + 3, column=0, columnspan=3, sticky="w", pady=(8, 0))
     def _build_windows_tab(self):
         queue_box = ttk.LabelFrame(self.windows_tab, text="Виртуальная очередь Windows", padding=12)
         queue_box.pack(fill="x", pady=(0, 12))
@@ -489,8 +521,17 @@ class PrintRoundRobinApp:
             self.setting_vars[key].set(str(getattr(self.config, key)))
         self.auto_start_var.set(self.config.auto_start_engine)
         self.windows_startup_var.set(self.config.start_with_windows)
+        self.snmp_enabled_var.set(self.config.snmp_enabled)
+        self.snmp_version_var.set(self.config.snmp_version)
+        self.snmp_community_var.set(self.config.snmp_community)
+        self.snmp_port_var.set(str(self.config.snmp_port))
+        self.snmp_timeout_var.set(str(self.config.snmp_timeout))
+        self.snmp_interval_var.set(str(self.config.snmp_interval))
         self.driver_var.set(self.config.driver_name)
+        self.theme_manager.apply(self.config.theme)
+        self._update_theme_button()
         self._refresh_printer_config_tree()
+        self._rebuild_printer_cards()
         self.footer_var.set(f"Настройки: {self.store.path}")
 
     def _config_from_controls(self) -> AppConfig:
@@ -507,8 +548,13 @@ class PrintRoundRobinApp:
         values["driver_name"] = self.driver_var.get().strip()
         values["auto_start_engine"] = bool(self.auto_start_var.get())
         values["start_with_windows"] = bool(self.windows_startup_var.get())
+        values["snmp_enabled"] = bool(self.snmp_enabled_var.get())
+        values["snmp_version"] = self.snmp_version_var.get().strip() or "2c"
+        values["snmp_community"] = self.snmp_community_var.get().strip() or "public"
+        values["snmp_port"] = int(self.snmp_port_var.get())
+        values["snmp_timeout"] = float(self.snmp_timeout_var.get().replace(",", "."))
+        values["snmp_interval"] = float(self.snmp_interval_var.get().replace(",", "."))
         return AppConfig.from_dict(values)
-
     def save_settings(self, silent: bool = False) -> bool:
         try:
             candidate = self._config_from_controls()
@@ -857,23 +903,196 @@ class PrintRoundRobinApp:
             self.root.after(1200, self._refresh_dashboard)
 
     def _update_printer_status(self, printers: list[dict]):
-        valid = set()
-        for row in printers:
-            host = row.get("host", "")
-            valid.add(host)
-            status = row.get("status", "")
-            tag = "ok" if status == "Доступен" else "busy" if status == "Занят" else "error" if status == "Недоступен" else ""
-            values = (
-                row.get("name", ""), host, status, row.get("jobs_sent", 0),
-                row.get("current_job", "") or "—", row.get("last_error", ""),
+        self._latest_printer_rows = {row.get("host", ""): row for row in printers if row.get("host")}
+        for host, card in self.printer_cards.items():
+            row = self._latest_printer_rows.get(host)
+            if row is None:
+                self._paint_printer_card(card, "unknown", "ОЖИДАНИЕ", "Нет свежих данных",
+                                         "Тонер: —", "Мониторинг ещё не получил ответ")
+                continue
+            self._render_printer_card(card, row)
+
+    def _render_printer_card(self, card: dict, row: dict) -> None:
+        device = row.get("device_status") or {}
+        current_job = row.get("current_job", "")
+        tcp_down = row.get("status") == "Недоступен"
+        snmp_available = row.get("snmp_available")
+        errors = device.get("errors") or []
+        state = "unknown"
+        title = "СОСТОЯНИЕ НЕИЗВЕСТНО"
+
+        if tcp_down:
+            state, title = "offline", "НЕТ СВЯЗИ"
+        elif current_job:
+            state, title = "transfer", "ПЕРЕДАЁТ ЗАДАНИЕ"
+        elif self.config.snmp_enabled and snmp_available is False:
+            state, title = "warning", "SNMP НЕ ОТВЕЧАЕТ"
+        elif self.config.snmp_enabled and not device:
+            state, title = "unknown", "ОПРОС SNMP..."
+        elif device:
+            state = device.get("state", "unknown")
+            title = {
+                "ready": "ГОТОВ • ОЖИДАЕТ",
+                "printing": "ПЕЧАТАЕТ",
+                "transfer": "ПЕРЕДАЁТ ЗАДАНИЕ",
+                "warning": "ПРЕДУПРЕЖДЕНИЕ",
+                "error": "КРИТИЧЕСКАЯ ОШИБКА",
+                "offline": "НЕТ СВЯЗИ",
+                "warmup": "ПРОГРЕВ",
+                "unknown": "СОСТОЯНИЕ НЕИЗВЕСТНО",
+            }.get(state, "СОСТОЯНИЕ НЕИЗВЕСТНО")
+        elif row.get("status") == "Доступен":
+            state, title = "unknown", "СЕТЬ ДОСТУПНА"
+
+        error_texts = [str(item.get("text", "")).strip() for item in errors if item.get("text")]
+        if tcp_down:
+            detail = "TCP-порт принтера недоступен"
+        elif error_texts:
+            detail = "  •  ".join(error_texts[:2])
+            if len(error_texts) > 2:
+                detail += f"  (+{len(error_texts) - 2})"
+        elif current_job:
+            detail = f"Документ: {current_job}"
+        elif snmp_available is False:
+            detail = "Сеть доступна, но SNMP не отвечает. Проверьте SNMP v1/v2c и community."
+        elif device:
+            detail = "Активных предупреждений нет"
+        else:
+            detail = "Ожидание данных состояния устройства"
+
+        toner_text = device.get("toner_text", "Уровень тонера не сообщается") if device else "Тонер: нет данных"
+        supplies = device.get("supplies") or []
+        consumable_warnings = []
+        for supply in supplies:
+            name = str(supply.get("name", ""))
+            percent = supply.get("percent")
+            if percent is not None and any(word in name.casefold() for word in ("toner", "тонер")):
+                consumable_warnings.append(f"{name}: {percent}%")
+        if consumable_warnings:
+            toner_text = "  •  ".join(consumable_warnings[:2])
+
+        network_text = "TCP: нет связи" if tcp_down else (
+            "TCP: OK" if row.get("status") == "Доступен" else "TCP: проверка"
+        )
+        if not self.config.snmp_enabled:
+            snmp_text = "SNMP: выкл."
+        elif snmp_available is True:
+            snmp_text = "SNMP: OK"
+        elif snmp_available is False:
+            snmp_text = "SNMP: нет ответа"
+        else:
+            snmp_text = "SNMP: опрос..."
+        footer = (
+            f"{network_text}  •  {snmp_text}  •  "
+            f"Заданий: {row.get('jobs_sent', 0)}"
+        )
+        if current_job:
+            footer = f"{footer}  •  ID: {current_job[:14]}"
+        self._paint_printer_card(card, state, title, detail, toner_text, footer)
+
+    def _paint_printer_card(self, card: dict, state: str, title: str,
+                            detail: str, toner: str, footer: str) -> None:
+        state_palette = self.theme_manager.status[self.theme_manager.current].get(
+            state, self.theme_manager.status[self.theme_manager.current]["unknown"]
+        )
+        palette = self.theme_manager.palette
+        frame = card["frame"]
+        frame.configure(
+            bg=state_palette["bg"],
+            highlightbackground=state_palette["border"],
+            highlightcolor=state_palette["border"],
+        )
+        for key in ("header", "name", "dot", "ip", "state", "detail", "toner", "footer"):
+            widget = card[key]
+            widget.configure(bg=state_palette["bg"])
+        card["name"].configure(fg=state_palette["title"])
+        card["dot"].configure(fg=state_palette["dot"])
+        card["ip"].configure(fg=palette["muted"])
+        card["state"].configure(text=title, fg=state_palette["text"])
+        card["detail"].configure(text=detail, fg=state_palette["text"])
+        card["toner"].configure(text=toner, fg=state_palette["text"])
+        card["footer"].configure(text=footer, fg=palette["muted"])
+
+    def _rebuild_printer_cards(self) -> None:
+        if not hasattr(self, "printer_grid"):
+            return
+        for child in self.printer_grid.winfo_children():
+            child.destroy()
+        self.printer_cards = {}
+        for col in range(5):
+            self.printer_grid.grid_columnconfigure(col, weight=1, uniform="printer-card")
+        for row in range(2):
+            self.printer_grid.grid_rowconfigure(row, weight=1, uniform="printer-row")
+        for index, printer in enumerate(self.config.printers[:10]):
+            self._create_printer_card(printer, index)
+        if len(self.config.printers) > 10:
+            self.logger.warning("В интерфейсе отображаются первые 10 принтеров; остальные не помещаются в панель 5×2.")
+        self._update_printer_status(list(getattr(self, "_latest_printer_rows", {}).values()))
+
+    def _update_theme_button(self) -> None:
+        if hasattr(self, "theme_button"):
+            self.theme_button.configure(
+                text="☾ Ночная тема" if self.theme_manager.current == "light" else "☀ Дневная тема"
             )
-            if self.printer_status_tree.exists(host):
-                self.printer_status_tree.item(host, values=values, tags=(tag,) if tag else ())
+
+    def toggle_theme(self) -> None:
+        self.config.theme = "dark" if self.theme_manager.current == "light" else "light"
+        self.theme_manager.apply(self.config.theme)
+        self._update_theme_button()
+        self._apply_dashboard_theme()
+        try:
+            self.store.save(self.config)
+            self.footer_var.set(f"Тема сохранена: {'ночная' if self.config.theme == 'dark' else 'дневная'}")
+        except Exception as exc:
+            self.logger.error("Не удалось сохранить тему: %s", exc)
+
+    def _apply_dashboard_theme(self) -> None:
+        palette = self.theme_manager.palette
+        if hasattr(self, "printer_grid"):
+            self.printer_grid.configure(bg=palette["panel"])
+        for key, item, dot in getattr(self, "_legend_widgets", []):
+            item.configure(bg=palette["panel"])
+            dot.configure(bg=palette["panel"], fg=self.theme_manager.status[self.theme_manager.current][key]["dot"])
+        for host, card in self.printer_cards.items():
+            row = getattr(self, "_latest_printer_rows", {}).get(host)
+            if row:
+                self._render_printer_card(card, row)
             else:
-                self.printer_status_tree.insert("", "end", iid=host, values=values, tags=(tag,) if tag else ())
-        for item in self.printer_status_tree.get_children():
-            if item not in valid:
-                self.printer_status_tree.delete(item)
+                self._paint_printer_card(card, "unknown", "ОЖИДАНИЕ", "Нет свежих данных",
+                                         "Тонер: —", "SNMP: —")
+
+    def show_printer_details(self, host: str) -> None:
+        row = getattr(self, "_latest_printer_rows", {}).get(host, {})
+        config = next((p for p in self.config.printers if p.host == host), None)
+        device = row.get("device_status") or {}
+        lines = [
+            f"Принтер: {config.name if config else host}",
+            f"Адрес: {host}:{config.port if config else 9100}",
+            f"Состояние TCP: {row.get('status', 'Нет данных')}",
+            f"Состояние SNMP: {'доступен' if row.get('snmp_available') else 'нет ответа' if row.get('snmp_available') is False else 'не опрошен'}",
+        ]
+        if device:
+            lines.append(f"Состояние устройства: {device.get('state_text', device.get('state', 'неизвестно'))}")
+            lines.append(f"SNMP-имя: {device.get('name', '—')}")
+            lines.append(f"Последний опрос: {time.strftime('%d.%m.%Y %H:%M:%S', time.localtime(device.get('polled_at', time.time())))}")
+            lines.append("")
+            lines.append("АППАРАТНЫЕ ПРЕДУПРЕЖДЕНИЯ:")
+            lines.extend(f" • {item.get('text', '')}" for item in device.get("errors", []))
+            if not device.get("errors"):
+                lines.append(" • Нет активных предупреждений")
+            lines.append("")
+            lines.append("РАСХОДНЫЕ МАТЕРИАЛЫ:")
+            lines.extend(
+                f" • {item.get('name', 'Расходный материал')}: "
+                f"{item.get('percent')}%" if item.get("percent") is not None
+                else f" • {item.get('name', 'Расходный материал')}: уровень не сообщается"
+                for item in device.get("supplies", [])
+            )
+        elif row.get("snmp_error"):
+            lines.extend(["", "Ошибка SNMP:", row["snmp_error"]])
+        lines.extend(["", f"Передано заданий: {row.get('jobs_sent', 0)}"])
+        messagebox.showinfo("Подробное состояние принтера", "\n".join(lines), parent=self.root)
+
 
     def _update_job_event(self, event: dict):
         if event.get("type") in ("job", "job_progress") and event.get("job"):

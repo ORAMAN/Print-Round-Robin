@@ -548,6 +548,15 @@ def poll_printer(host: str, community: str = "public", port: int = 161,
     notices = [item for item in errors if item.get("severity") == "info"]
     errors = [item for item in errors if item.get("severity") != "info"]
 
+    # Some printers raise the generic hrDeviceStatus=warning flag for low supplies.
+    # When a specific consumable notice exists and the printer is operational,
+    # do not let that generic host-resource flag mask Ready / Printing.
+    if notices and printer_status in (3, 4, 5):
+        errors = [
+            item for item in errors
+            if item.get("text") != "Устройство сообщает состояние WARNING (hrDeviceStatus=3)"
+        ]
+
     critical = any(item["severity"] == "critical" for item in errors)
     warning = any(item["severity"] == "warning" for item in errors)
     state_names = {1: "Другое", 2: "Неизвестно", 3: "Ожидает", 4: "Печатает", 5: "Прогрев"}

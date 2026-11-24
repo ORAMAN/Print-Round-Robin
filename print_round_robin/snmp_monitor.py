@@ -352,7 +352,7 @@ def _poll_supply_data(client: SnmpClient) -> list[dict]:
                 status, status_text = "ok", f"Заполнен на {percent}% — норма"
 
         if description or is_waste_toner:
-            supplies.append({
+            supply = {
                 "name": name,
                 "kind": kind,
                 "snmp_type": supply_type,
@@ -362,7 +362,13 @@ def _poll_supply_data(client: SnmpClient) -> list[dict]:
                 "status": status,
                 "status_text": status_text,
                 "percent_semantics": "fill" if is_waste_toner else "remaining",
-            })
+            }
+            # Keep the device's original Printer-MIB description. On Kyocera
+            # models this may contain the actual cartridge model (for example,
+            # TK-xxx); the normalized display name alone loses that detail.
+            if kind == "toner" and description.casefold() not in {"toner", "тонер"}:
+                supply["model"] = description
+            supplies.append(supply)
     return supplies
 
 

@@ -553,18 +553,25 @@ class RoundRobinEngine:
                     runtime = self._printer_runtime[printer.host]
                     if runtime.busy:
                         continue
+                    checked_at_before_probe = runtime.checked_at
                     futures[pool.submit(
                         self._check_printer_tcp, printer
-                    )] = printer
+                    )] = (printer, checked_at_before_probe)
                 for future in as_completed(futures):
                     if self._stop.is_set():
                         return
-                    printer = futures[future]
+                    printer, checked_at_before_probe = futures[future]
                     runtime = self._printer_runtime[printer.host]
                     # Результат проверки, начатой до резервирования принтера,
                     # нельзя применять во время/сразу после передачи: принтер
                     # может временно не принимать второе TCP-соединение.
-                    if runtime.busy or self._printer_locks[printer.host].locked():
+                    # checked_at меняется при успешном резервировании, поэтому
+                    # отбрасываем также запоздавший ответ уже завершившейся передачи.
+                    if (
+                        runtime.busy
+                        or self._printer_locks[printer.host].locked()
+                        or runtime.checked_at != checked_at_before_probe
+                    ):
                         continue
                     try:
                         available, error = future.result()

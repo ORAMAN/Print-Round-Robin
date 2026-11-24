@@ -1752,7 +1752,7 @@ class PrintRoundRobinApp:
         row = self.transfer_rows.get(job_id)
         if row is None:
             if not self._transfer_box_visible:
-                self.transfer_box.pack(fill="x", pady=(0, 6), before=self.job_tree)
+                self.transfer_box.pack(fill="x", pady=(0, 6), before=self.job_tree.master)
                 self._transfer_box_visible = True
             frame = ttk.Frame(self.transfer_box)
             frame.pack(fill="x", pady=2)

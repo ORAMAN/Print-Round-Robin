@@ -177,7 +177,7 @@ class PrintRoundRobinApp:
         self.root.after(150, self._poll_events)
         self.root.after(250, self._poll_logs)
         self.root.after(1000, self._poll_admin_result)
-        self.root.after(1200, self._refresh_dashboard)
+        self.root.after(300, self._refresh_dashboard)
         self.root.after(300, self._refresh_queue_info)
         self.root.after(400, self.refresh_drivers)
         self.root.after(900, self.check_virtual_queue)
@@ -1333,8 +1333,11 @@ class PrintRoundRobinApp:
         threading.Thread(target=worker, name="EngineStopper", daemon=True).start()
 
     def _poll_events(self):
+        # Bound each UI tick so event bursts cannot monopolize Tk's thread.
+        processed = 0
+        max_events_per_tick = 500
         try:
-            while True:
+            while processed < max_events_per_tick:
                 event = self.events.get_nowait()
                 kind = event.get("type")
                 if kind == "engine":
@@ -1383,6 +1386,7 @@ class PrintRoundRobinApp:
                 elif kind == "queue_inspection_error":
                     self.windows_status_var.set("Проверка очереди Windows не выполнена: " + event.get("message", ""))
                 self.events.task_done()
+                processed += 1
         except queue.Empty:
             pass
         if not self._closing:
@@ -1409,7 +1413,6 @@ class PrintRoundRobinApp:
                 snapshot = self.engine.snapshot()
                 for key in ("received", "queued", "active", "completed", "failed"):
                     self.metric_vars[key].set(str(snapshot.get(key, 0)))
-                self._update_printer_status(snapshot.get("printers", []))
                 for job in snapshot.get("jobs", []):
                     self._upsert_job(job)
             except Exception:

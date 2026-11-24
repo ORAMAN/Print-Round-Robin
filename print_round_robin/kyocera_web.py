@@ -149,7 +149,7 @@ def _classify_status(visible: str) -> tuple[str, str, list[dict[str, str]]]:
 
 def _classify_advisories(visible: str) -> list[dict[str, str]]:
     """Extract non-blocking consumable notices separately from printer faults."""
-    lower = re.sub(r"\\s+", " ", visible).casefold()
+    lower = re.sub(r"\s+", " ", visible).casefold()
     advisories = []
     if any(token in lower for token in ("low toner", "toner low", "мало тонера", "низкий уровень тонера")):
         advisories.append({"text": "Мало тонера", "severity": "info"})

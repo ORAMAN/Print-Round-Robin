@@ -320,12 +320,13 @@ def _poll_supply_data(client: SnmpClient) -> list[dict]:
         suffix = _index_from_oid(item.oid, PRT_SUPPLY_DESCRIPTION)
         supply_type = types.get(suffix)
         description = _text(item.value)
-        # Printer-MIB prtMarkerSuppliesType: toner(3), wasteToner(4).
+        # The device may expose a generic waste-toner component name without
+        # publishing its actual fill/status. Do not present that as a supply
+        # reading; real warning/critical events are handled by _poll_alerts.
         is_waste_toner = supply_type == 4 or "waste toner" in description.casefold() or "отработанн" in description.casefold()
         if is_waste_toner:
-            name = "Бункер отработанного тонера"
-            kind = "waste_toner"
-        elif supply_type == 3 or any(word in description.casefold() for word in ("toner", "тонер")):
+            continue
+        if supply_type == 3 or any(word in description.casefold() for word in ("toner", "тонер")):
             name = "Тонер"
             kind = "toner"
         else:
@@ -339,19 +340,7 @@ def _poll_supply_data(client: SnmpClient) -> list[dict]:
         if isinstance(level, int) and isinstance(capacity, int) and level >= 0 and capacity > 0:
             percent = max(0, min(100, round(level * 100 / capacity)))
 
-        status_text = ""
-        status = "unknown"
-        if kind == "waste_toner":
-            if percent is None:
-                status_text = "Заполнение не сообщается"
-            elif percent >= 95:
-                status, status_text = "critical", f"Заполнен на {percent}% — требуется замена"
-            elif percent >= 80:
-                status, status_text = "warning", f"Заполнен на {percent}% — скоро потребуется замена"
-            else:
-                status, status_text = "ok", f"Заполнен на {percent}% — норма"
-
-        if description or is_waste_toner:
+        if description:
             supply = {
                 "name": name,
                 "kind": kind,
@@ -359,9 +348,9 @@ def _poll_supply_data(client: SnmpClient) -> list[dict]:
                 "level": level,
                 "capacity": capacity,
                 "percent": percent,
-                "status": status,
-                "status_text": status_text,
-                "percent_semantics": "fill" if is_waste_toner else "remaining",
+                "status": "unknown",
+                "status_text": "",
+                "percent_semantics": "remaining",
             }
             # Keep the device's original Printer-MIB description. On Kyocera
             # models this may contain the actual cartridge model (for example,
@@ -389,12 +378,14 @@ def _poll_alerts(client: SnmpClient) -> list[dict]:
             "waste toner box", "waste toner container",
             "контейнер отработанного тонера", "бункер отработанного тонера",
         )):
+            # Ignore generic/informational mentions. Only device-reported
+            # warning and critical severities represent actionable status.
             if severity == 3:
                 description = "Бункер отработанного тонера заполнен — требуется замена"
             elif severity in (4, 5):
                 description = "Бункер отработанного тонера требует внимания"
             else:
-                description = "Бункер отработанного тонера: состояние не определено"
+                continue
         alerts.append({"text": description, "severity": level})
     return alerts
 
@@ -522,12 +513,7 @@ def poll_printer(host: str, community: str = "public", port: int = 161,
     supply_warning = []
     for supply in supplies:
         name = supply["name"].casefold()
-        if supply.get("kind") == "waste_toner" and supply.get("status") in ("warning", "critical"):
-            supply_warning.append({
-                "text": f"Бункер отработанного тонера: {supply.get('status_text') or 'требуется внимание'}",
-                "severity": supply["status"],
-            })
-        elif supply["percent"] is not None and any(word in name for word in ("toner", "тонер")):
+        if supply["percent"] is not None and any(word in name for word in ("toner", "тонер")):
             if supply["percent"] <= 5:
                 supply_warning.append({"text": f"Тонер почти закончился ({supply['percent']}%)", "severity": "critical"})
             elif supply["percent"] <= 15:

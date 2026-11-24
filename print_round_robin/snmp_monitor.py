@@ -387,7 +387,7 @@ def _poll_alerts(client: SnmpClient) -> list[dict]:
             ))
             # Ignore a bare component label. Preserve actionable text even if
             # the device reports an unhelpful generic severity code.
-            if severity == 3 or explicit_full:
+            if severity == 3 or (explicit_full and not explicit_warning):
                 description = "Бункер отработанного тонера заполнен — требуется замена"
                 level = "critical"
             elif severity in (4, 5) or explicit_warning:

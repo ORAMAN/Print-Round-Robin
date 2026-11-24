@@ -3,7 +3,7 @@ import threading
 import time
 
 from print_round_robin.config import AppConfig, PrinterConfig
-from print_round_robin.engine import RoundRobinEngine
+from print_round_robin.engine import JobInfo, RoundRobinEngine
 
 
 class RawPrinter:
@@ -125,3 +125,32 @@ def test_two_jobs_are_dispatched_to_different_printers_in_parallel(tmp_path, mon
         engine.stop()
         for printer in printers:
             printer.close()
+
+
+
+def test_snapshot_limits_jobs_and_prioritizes_active_then_newest(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    config = AppConfig(printers=[])
+    engine = RoundRobinEngine(config)
+    with engine._jobs_lock:
+        for index in range(125):
+            job = JobInfo(
+                job_id=f"job-{index:03d}",
+                filename=f"job-{index:03d}.prn",
+                status="Передано",
+                received_at=float(index),
+            )
+            engine._jobs[job.job_id] = job
+        # Старое активное задание должно остаться в видимой выборке.
+        engine._jobs["active-old"] = JobInfo(
+            job_id="active-old",
+            filename="active-old.prn",
+            status="Печатается",
+            received_at=1.0,
+        )
+
+    jobs = engine.snapshot()["jobs"]
+    assert len(jobs) == 100
+    assert jobs[-1]["job_id"] == "active-old"
+    assert jobs[0]["job_id"] == "job-025"
+    assert jobs[-1]["status"] == "Печатается"

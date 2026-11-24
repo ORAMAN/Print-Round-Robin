@@ -75,3 +75,21 @@ def test_command_center_detects_full_waste_toner_box():
     )
     assert state == "error"
     assert errors[0]["text"] == "Бункер отработанного тонера заполнен — требуется замена"
+
+
+def test_low_toner_and_low_paper_are_advisories_not_operational_errors():
+    visible = "Device Status: Ready to print. Low toner. Low paper."
+    state, message, errors = kyocera_web._classify_status(visible)
+    advisories = kyocera_web._classify_advisories(visible)
+    assert state == "ready"
+    assert errors == []
+    assert [item["text"] for item in advisories] == ["Мало тонера", "Мало бумаги"]
+
+
+def test_paper_jam_remains_critical_with_low_toner_advisory():
+    visible = "Device Status: Paper jam. Low toner."
+    state, message, errors = kyocera_web._classify_status(visible)
+    advisories = kyocera_web._classify_advisories(visible)
+    assert state == "error"
+    assert errors[0]["text"] == "Замятие бумаги"
+    assert advisories == [{"text": "Мало тонера", "severity": "info"}]

@@ -517,7 +517,7 @@ class PrintRoundRobinApp:
 
         # Отдельная панель показывает фактический ход отправки байтов на RAW TCP.
         self.transfer_box = ttk.LabelFrame(job_box, text="Текущая передача", padding=(7, 5), height=88)
-        self.transfer_box.pack(fill="x", pady=(0, 6), before=job_box.winfo_children()[0] if job_box.winfo_children() else None)
+        self.transfer_box.pack(fill="x", pady=(0, 6))
         self.transfer_box.pack_propagate(False)
         self.transfer_rows: dict[str, dict] = {}
         self.transfer_empty = ttk.Label(self.transfer_box, text="Нет активных передач", style="Muted.TLabel")

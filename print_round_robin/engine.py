@@ -636,7 +636,16 @@ class RoundRobinEngine:
 
     def snapshot(self) -> dict:
         with self._jobs_lock:
-            jobs = [job.as_dict() for job in list(self._jobs.values())[-100:]]
+            # Сначала показываем активные задания, затем самые новые завершённые.
+            active_statuses = {"В очереди", "В очереди после перезапуска", "Печатается"}
+            ordered_jobs = sorted(
+                self._jobs.values(),
+                key=lambda job: (job.status in active_statuses, job.received_at),
+                reverse=True,
+            )[:100]
+            # GUI добавляет строки в начало; отдаём их в обратном порядке,
+            # чтобы после заполнения таблицы сверху оказались активные/новые.
+            jobs = [job.as_dict() for job in reversed(ordered_jobs)]
             counters = dict(self._counters)
         return {
             "running": self.running,

@@ -73,9 +73,13 @@ def _format_supply_line(supply: dict) -> str:
         return f"{name}: {status_text}"
 
     percent = supply.get("percent")
+    advisory = str(supply.get("advisory") or "").strip()
     if isinstance(percent, (int, float)):
         suffix = "заполнение" if supply.get("percent_semantics") == "fill" else ""
-        return f"{name}: {percent}%{(' — ' + suffix) if suffix else ''}"
+        detail = f"{percent}%{(' — ' + suffix) if suffix else ''}"
+        if advisory:
+            detail += f" — {advisory.casefold()}"
+        return f"{name}: {detail}"
     return name
 
 
@@ -1495,6 +1499,16 @@ class PrintRoundRobinApp:
                 item for item in (web.get("errors") or [])
                 if str(item.get("text", "")).casefold() not in known_errors
             )
+        advisories = []
+        advisory_seen = set()
+        for source in (() if device_stale else (device.get("advisories") or []),
+                       () if web_stale else (web.get("advisories") or [])):
+            for item in source:
+                message = str(item.get("text", "")).strip()
+                if message and message.casefold() not in advisory_seen:
+                    advisories.append(message)
+                    advisory_seen.add(message.casefold())
+
         state = "unknown"
         title = "СОСТОЯНИЕ НЕИЗВЕСТНО"
 
@@ -1537,6 +1551,8 @@ class PrintRoundRobinApp:
             detail = "  •  ".join(error_texts[:2])
             if len(error_texts) > 2:
                 detail += f"  (+{len(error_texts) - 2})"
+        elif advisories:
+            detail = "  •  ".join(advisories[:2])
         elif current_job:
             detail = f"Документ: {current_job}"
         elif tcp_down and snmp_available is not True and not web_available:
@@ -1546,7 +1562,7 @@ class PrintRoundRobinApp:
         elif snmp_available is False and not web_available:
             detail = "Сеть доступна, но SNMP не отвечает. Проверьте SNMP v1/v2c и community."
         elif device or web_available:
-            detail = (device.get("status_message") if device and not device_stale else "") or web.get("status_message") or "Активных предупреждений нет"
+            detail = (device.get("status_message") if device and not device_stale else "") or web.get("status_message") or "Активных неисправностей нет"
         else:
             detail = "Ожидание данных состояния устройства"
 

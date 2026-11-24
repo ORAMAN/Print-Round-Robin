@@ -168,6 +168,27 @@ def test_waste_toner_box_is_identified_and_percentage_means_fill_level():
     }]
 
 
+def test_toner_supply_keeps_original_cartridge_model_description():
+    from print_round_robin import snmp_monitor
+
+    class FakeClient:
+        def walk(self, oid, max_rows=80):
+            rows = {
+                snmp_monitor.PRT_SUPPLY_TYPE: [snmp_monitor.VarBind(oid + ".1", 0x02, 3)],
+                snmp_monitor.PRT_SUPPLY_DESCRIPTION: [snmp_monitor.VarBind(oid + ".1", 0x04, b"TK-3190")],
+                snmp_monitor.PRT_SUPPLY_CAPACITY: [snmp_monitor.VarBind(oid + ".1", 0x02, 100)],
+                snmp_monitor.PRT_SUPPLY_LEVEL: [snmp_monitor.VarBind(oid + ".1", 0x02, 76)],
+            }
+            return rows.get(oid, [])
+
+    result = snmp_monitor._poll_supply_data(FakeClient())
+    assert len(result) == 1
+    assert result[0]["name"] == "Тонер"
+    assert result[0]["kind"] == "toner"
+    assert result[0]["model"] == "TK-3190"
+    assert result[0]["percent"] == 76
+
+
 def test_waste_toner_box_unknown_level_is_not_reported_as_empty():
     from print_round_robin import snmp_monitor
 

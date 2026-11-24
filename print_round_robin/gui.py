@@ -54,6 +54,29 @@ def configure_logging(target: queue.Queue) -> logging.Logger:
     return logger
 
 
+def _format_supply_line(supply: dict) -> str:
+    """Build a compact supply label while keeping the toner cartridge model."""
+    name = str(supply.get("name", "")).strip()
+    if not name:
+        return ""
+
+    kind = str(supply.get("kind", "")).casefold()
+    model = str(supply.get("model") or supply.get("description") or "").strip()
+    if kind == "toner" and model and model.casefold() not in {"toner", "тонер"}:
+        if model.casefold() != name.casefold():
+            name = f"{name} ({model})"
+
+    status_text = str(supply.get("status_text", "")).strip()
+    if status_text:
+        return f"{name}: {status_text}"
+
+    percent = supply.get("percent")
+    if isinstance(percent, (int, float)):
+        suffix = "заполнение" if supply.get("percent_semantics") == "fill" else ""
+        return f"{name}: {percent}%{(' — ' + suffix) if suffix else ''}"
+    return name
+
+
 class PrinterDialog(tk.Toplevel):
     def __init__(self, parent, title: str, printer: PrinterConfig | None = None,
                  default_port: int = 9100):
@@ -576,18 +599,19 @@ class PrintRoundRobinApp:
             frame, text="Состояние устройства пока не опрашивалось",
             bg=state_palette["bg"], fg=state_palette["text"],
             font=("Segoe UI", 9, "bold"), anchor="w", justify="left",
-            wraplength=250, height=2,
+            wraplength=250,
         )
         detail_label.pack(fill="x")
         toner_label = tk.Label(
-            frame, text="Тонер: —", bg=state_palette["bg"],
+            frame, text="Расходные материалы: —", bg=state_palette["bg"],
             fg=state_palette["text"], font=("Segoe UI", 9), anchor="w",
+            justify="left", wraplength=250,
         )
         toner_label.pack(fill="x", pady=(3, 0))
         footer_label = tk.Label(
             frame, text="Сеть: проверка  •  SNMP: —  •  Заданий: 0",
             bg=state_palette["bg"], fg=palette["muted"],
-            font=("Segoe UI", 8), anchor="w",
+            font=("Segoe UI", 8), anchor="w", justify="left", wraplength=250,
         )
         footer_label.pack(fill="x", side="bottom", pady=(5, 0))
 
@@ -601,6 +625,11 @@ class PrintRoundRobinApp:
         for widget in (frame, header, name_label, dot_label, ip_label, state_label,
                        detail_label, toner_label, footer_label):
             widget.bind("<Double-Button-1>", lambda _event, host=printer.host: self.show_printer_details(host))
+        frame.bind(
+            "<Configure>",
+            lambda event, current=card: self._resize_printer_card_text(current, event.width),
+            add="+",
+        )
 
     def _build_printers(self):
         toolbar = ttk.Frame(self.printers_tab)
@@ -1525,23 +1554,12 @@ class PrintRoundRobinApp:
         supplies = [] if device_stale else (device.get("supplies") or [])
         if not supplies and not web_stale:
             supplies = web.get("supplies") or []
-        supply_parts = []
-        for supply in supplies:
-            name = str(supply.get("name", "")).strip()
-            if not name:
-                continue
-            percent = supply.get("percent")
-            status_text = str(supply.get("status_text", "")).strip()
-            if status_text:
-                supply_parts.append(f"{name}: {status_text}")
-            elif isinstance(percent, (int, float)):
-                suffix = "заполнение" if supply.get("percent_semantics") == "fill" else ""
-                supply_parts.append(f"{name}: {percent}%{(' — ' + suffix) if suffix else ''}")
-            else:
-                supply_parts.append(name)
-        supplies_text = "  •  ".join(supply_parts[:3])
+        supply_parts = [line for line in (_format_supply_line(item) for item in supplies) if line]
+        # Separate supplies into lines: long Kyocera consumable descriptions
+        # should wrap inside the card instead of running into its neighbor.
+        supplies_text = "\\n".join(supply_parts[:3])
         if len(supply_parts) > 3:
-            supplies_text += f"  (+{len(supply_parts) - 3})"
+            supplies_text += f"\\n(+{len(supply_parts) - 3})"
 
         network_text = (
             "RAW: передача" if current_job else
@@ -1571,6 +1589,16 @@ class PrintRoundRobinApp:
         if current_job:
             footer = f"{footer}  •  ID: {current_job[:14]}"
         self._paint_printer_card(card, state, title, detail, supplies_text, footer)
+
+    @staticmethod
+    def _resize_printer_card_text(card: dict, width: int) -> None:
+        """Keep variable-length status and supply text inside its card."""
+        wraplength = max(145, int(width) - 30)
+        for key in ("detail", "toner", "footer"):
+            try:
+                card[key].configure(wraplength=wraplength)
+            except tk.TclError:
+                pass
 
     def _paint_printer_card(self, card: dict, state: str, title: str,
                             detail: str, toner: str, footer: str) -> None:

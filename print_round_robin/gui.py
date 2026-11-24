@@ -1450,11 +1450,20 @@ class PrintRoundRobinApp:
 
     def _render_printer_card(self, card: dict, row: dict) -> None:
         device = row.get("device_status") or {}
+        web = row.get("web_status") or {}
+        web_available = web.get("web_available") is True
+        web_stale = bool(web.get("stale"))
         current_job = row.get("current_job", "")
         tcp_down = row.get("status") == "Недоступен"
         snmp_available = row.get("snmp_available")
         device_stale = bool(device.get("stale"))
-        errors = [] if device_stale else (device.get("errors") or [])
+        errors = [] if device_stale else list(device.get("errors") or [])
+        if not web_stale:
+            known_errors = {str(item.get("text", "")).casefold() for item in errors}
+            errors.extend(
+                item for item in (web.get("errors") or [])
+                if str(item.get("text", "")).casefold() not in known_errors
+            )
         state = "unknown"
         title = "СОСТОЯНИЕ НЕИЗВЕСТНО"
 
@@ -1467,16 +1476,17 @@ class PrintRoundRobinApp:
         elif current_job:
             # Активная передача важнее устаревшего результата TCP-проверки.
             state, title = "transfer", "ПЕРЕДАЁТ ЗАДАНИЕ"
-        elif tcp_down and snmp_available is not True:
+        elif tcp_down and snmp_available is not True and not web_available:
             state, title = "offline", "НЕТ СВЯЗИ"
         elif tcp_down and snmp_available is True:
             state, title = "warning", "RAW-ПОРТ НЕДОСТУПЕН"
-        elif self.config.snmp_enabled and snmp_available is False:
+        elif self.config.snmp_enabled and snmp_available is False and not web_available:
             state, title = "warning", "SNMP НЕ ОТВЕЧАЕТ"
-        elif self.config.snmp_enabled and not device:
+        elif self.config.snmp_enabled and not device and not web_available:
             state, title = "unknown", "ОПРОС SNMP..."
-        elif device:
-            state = device.get("state", "unknown")
+        elif device or web_available:
+            status_source = device if device and not device_stale else web
+            state = status_source.get("state", "unknown")
             title = {
                 "ready": "ГОТОВ • ОЖИДАЕТ",
                 "printing": "ПЕЧАТАЕТ",
@@ -1497,14 +1507,14 @@ class PrintRoundRobinApp:
                 detail += f"  (+{len(error_texts) - 2})"
         elif current_job:
             detail = f"Документ: {current_job}"
-        elif tcp_down and snmp_available is not True:
-            detail = "Нет ответа от RAW TCP и SNMP"
+        elif tcp_down and snmp_available is not True and not web_available:
+            detail = "Нет ответа от RAW TCP, SNMP и веб-интерфейса"
         elif tcp_down and snmp_available is True:
             detail = "Устройство отвечает по SNMP, но RAW TCP-порт печати недоступен"
-        elif snmp_available is False:
+        elif snmp_available is False and not web_available:
             detail = "Сеть доступна, но SNMP не отвечает. Проверьте SNMP v1/v2c и community."
-        elif device:
-            detail = device.get("status_message") or "Активных предупреждений нет"
+        elif device or web_available:
+            detail = (device.get("status_message") if device and not device_stale else "") or web.get("status_message") or "Активных предупреждений нет"
         else:
             detail = "Ожидание данных состояния устройства"
 
@@ -1512,6 +1522,8 @@ class PrintRoundRobinApp:
         # Если модель не публикует их через Printer-MIB, строка остаётся пустой,
         # а не заполняется одинаковым бесполезным сообщением для всех принтеров.
         supplies = [] if device_stale else (device.get("supplies") or [])
+        if not supplies and not web_stale:
+            supplies = web.get("supplies") or []
         supply_parts = []
         for supply in supplies:
             name = str(supply.get("name", "")).strip()
@@ -1540,8 +1552,15 @@ class PrintRoundRobinApp:
             snmp_text = "SNMP: нет ответа"
         else:
             snmp_text = "SNMP: опрос..."
+        wsd_port = web.get("wsd_port")
+        if web.get("wsd_available") is True:
+            wsd_text = f"WSD: OK ({wsd_port})"
+        elif web.get("wsd_available") is False:
+            wsd_text = "WSD: нет ответа"
+        else:
+            wsd_text = "WSD: опрос..."
         footer = (
-            f"{network_text}  •  {snmp_text}  •  "
+            f"{network_text}  •  {snmp_text}  •  {wsd_text}  •  "
             f"Заданий: {row.get('jobs_sent', 0)}"
         )
         if current_job:

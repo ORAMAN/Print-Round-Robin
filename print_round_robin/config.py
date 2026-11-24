@@ -59,7 +59,7 @@ class AppConfig:
     send_timeout: float = 300.0
     retry_delay: float = 3.0
     busy_retry_delay: float = 0.25
-    health_interval: float = 5.0
+    health_interval: float = 1.0
     receive_buffer_size: int = 1024 * 1024
     max_receivers: int = 20
     max_workers: int = 10
@@ -71,7 +71,7 @@ class AppConfig:
     snmp_community: str = "public"
     snmp_port: int = 161
     snmp_timeout: float = 0.8
-    snmp_interval: float = 10.0
+    snmp_interval: float = 5.0
     printers: list[PrinterConfig] = field(default_factory=lambda: [
         PrinterConfig(name=f"Kyocera {index}", host=f"192.168.20.{index + 120}")
         for index in range(1, 11)

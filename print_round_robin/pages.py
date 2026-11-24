@@ -10,10 +10,10 @@ import re
 from pathlib import Path
 
 
-_PDF_PAGE = re.compile(rb"/Type\\s*/Page\\b")
-_PDF_OBJECT_STREAM = re.compile(rb"/Type\\s*/ObjStm\\b")
-_PS_PAGES = re.compile(rb"(?m)^%%Pages:\\s*(\\d+)\\s*$")
-_PS_PAGES_AT_END = re.compile(rb"(?m)^%%Pages:\\s*\\(atend\\)\\s*$")
+_PDF_PAGE = re.compile(rb"/Type\s*/Page\b")
+_PDF_OBJECT_STREAM = re.compile(rb"/Type\s*/ObjStm\b")
+_PS_PAGES = re.compile(rb"(?m)^%%Pages:\s*(\d+)\s*$")
+_PS_PAGES_AT_END = re.compile(rb"(?m)^%%Pages:\s*\(atend\)\s*$")
 _PS_PAGE = re.compile(rb"(?m)^%%Page:")
 
 

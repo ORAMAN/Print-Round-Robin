@@ -516,7 +516,12 @@ def poll_printer(host: str, community: str = "public", port: int = 161,
     supply_warning = []
     for supply in supplies:
         name = supply["name"].casefold()
-        if supply["percent"] is not None and any(word in name for word in ("toner", "тонер")):
+        if supply.get("kind") == "waste_toner" and supply.get("status") in ("warning", "critical"):
+            supply_warning.append({
+                "text": f"Бункер отработанного тонера: {supply.get('status_text') or 'требуется внимание'}",
+                "severity": supply["status"],
+            })
+        elif supply["percent"] is not None and any(word in name for word in ("toner", "тонер")):
             if supply["percent"] <= 5:
                 supply_warning.append({"text": f"Тонер почти закончился ({supply['percent']}%)", "severity": "critical"})
             elif supply["percent"] <= 15:

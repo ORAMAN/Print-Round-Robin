@@ -203,6 +203,8 @@ def poll_kyocera_web(host: str, timeout: float = WEB_TIMEOUT) -> dict:
                 "text": f"Бункер отработанного тонера: {waste_status.casefold()}",
                 "severity": waste_state,
             })
+            state = "error" if waste_state == "critical" else ("error" if state == "error" else "warning")
+            status_message = errors[-1]["text"]
     return {
         "wsd_available": wsd_port is not None,
         "wsd_port": wsd_port,

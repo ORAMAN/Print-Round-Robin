@@ -1548,7 +1548,10 @@ class PrintRoundRobinApp:
 
         error_texts = [str(item.get("text", "")).strip() for item in errors if item.get("text")]
         if error_texts:
-            detail = "  •  ".join(error_texts[:2])
+            detail_items = error_texts[:2]
+            if advisories and len(detail_items) < 2:
+                detail_items.append(advisories[0])
+            detail = "  •  ".join(detail_items)
             if len(error_texts) > 2:
                 detail += f"  (+{len(error_texts) - 2})"
         elif advisories:

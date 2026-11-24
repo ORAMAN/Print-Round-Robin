@@ -11,10 +11,10 @@ def test_toner_card_line_includes_cartridge_model():
     }) == "Тонер (TK-3190): 76%"
 
 
-def test_waste_toner_line_uses_fill_status_text():
+def test_waste_toner_supply_line_is_hidden_when_not_reported():
     assert _format_supply_line({
         "name": "Бункер отработанного тонера",
         "kind": "waste_toner",
         "status_text": "Заполнение не сообщается",
         "percent": None,
-    }) == "Бункер отработанного тонера: Заполнение не сообщается"
+    }) == ""

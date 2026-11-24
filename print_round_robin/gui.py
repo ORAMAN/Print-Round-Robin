@@ -474,7 +474,7 @@ class PrintRoundRobinApp:
 
         ttk.Label(
             self.monitor_tab,
-            text="* Число страниц определяется для обычных PDF и PostScript. Для остальных RAW-форматов показывается «—».",
+            text="* Сумма распознанных страниц принятых заданий. PDF и PostScript; остальные RAW-форматы не оцениваются.",
             style="Muted.TLabel",
         ).pack(anchor="w", pady=(0, 5))
 
@@ -1427,7 +1427,7 @@ class PrintRoundRobinApp:
             except Exception:
                 self.logger.exception("Не удалось обновить мониторинг")
         if not self._closing:
-            self.root.after(1200, self._refresh_dashboard)
+            self.root.after(300, self._refresh_dashboard)
 
     def _update_printer_status(self, printers: list[dict]):
         self._latest_printer_rows = {row.get("host", ""): row for row in printers if row.get("host")}

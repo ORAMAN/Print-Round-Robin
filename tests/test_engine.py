@@ -63,7 +63,7 @@ def test_one_job_is_staged_and_forwarded_to_raw_printer(tmp_path, monkeypatch):
         send_timeout=5,
     )
     engine = RoundRobinEngine(config)
-    payload = b"%PDF-1.7\nprint-round-robin-test\n" + bytes(range(256))
+    payload = (b"%PDF-1.7\n1 0 obj << /Type /Page >>\n2 0 obj << /Type /Page >>\n" + bytes(range(256)))
     try:
         engine.start()
         with socket.create_connection(("127.0.0.1", listener_port), timeout=2) as client:
@@ -76,6 +76,8 @@ def test_one_job_is_staged_and_forwarded_to_raw_printer(tmp_path, monkeypatch):
         snapshot = engine.snapshot()
         assert snapshot["completed"] == 1
         assert snapshot["failed"] == 0
+        assert snapshot["pages"] == 2
+        assert snapshot["jobs"][0]["page_count"] == 2
     finally:
         engine.stop()
         printer.close()

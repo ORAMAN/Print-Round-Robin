@@ -226,3 +226,21 @@ def test_waste_toner_device_warning_remains_visible_as_real_alert():
         "text": "Бункер отработанного тонера требует внимания",
         "severity": "warning",
     }]
+
+
+def test_explicit_waste_toner_full_text_is_kept_even_with_generic_severity():
+    from print_round_robin import snmp_monitor
+
+    class FakeClient:
+        def walk(self, oid, max_rows=80):
+            if oid == snmp_monitor.PRT_ALERT_DESCRIPTION:
+                return [snmp_monitor.VarBind(oid + ".1", 0x04, b"Waste Toner Box Full")]
+            if oid == snmp_monitor.PRT_ALERT_SEVERITY:
+                return [snmp_monitor.VarBind(oid + ".1", 0x02, 1)]
+            return []
+
+    result = snmp_monitor._poll_alerts(FakeClient())
+    assert result == [{
+        "text": "Бункер отработанного тонера заполнен — требуется замена",
+        "severity": "critical",
+    }]

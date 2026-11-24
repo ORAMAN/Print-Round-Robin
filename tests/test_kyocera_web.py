@@ -52,24 +52,21 @@ def test_web_poll_reports_unavailable_without_failing():
 
 
 
-def test_command_center_identifies_waste_toner_box_without_inventing_its_state():
+def test_command_center_does_not_show_waste_toner_label_without_status():
     source = "<html><body>Device Status: Ready to print. Waste Toner Box</body></html>"
     monkeypatch_result = kyocera_web._visible_text(source)
     state, message, errors = kyocera_web._classify_status(monkeypatch_result)
     assert state == "ready"
     assert errors == []
 
-    # The web monitor must expose the named component, but not claim it is full
-    # when the page only publishes its label.
-    import pytest
+    # A bare component label is not an actionable supply reading.
     from unittest.mock import patch
     with patch.object(kyocera_web, "_read_home_page", return_value=("http://192.0.2.1/", source)), \
          patch.object(kyocera_web.socket, "create_connection", side_effect=OSError("closed")):
         result = kyocera_web.poll_kyocera_web("192.0.2.1")
-    waste = next(item for item in result["supplies"] if item["kind"] == "waste_toner")
-    assert waste["name"] == "Бункер отработанного тонера"
-    assert waste["status"] == "unknown"
-    assert waste["status_text"] == "Состояние не сообщается"
+    assert result["supplies"] == []
+    assert result["state"] == "ready"
+    assert result["errors"] == []
 
 
 def test_command_center_detects_full_waste_toner_box():

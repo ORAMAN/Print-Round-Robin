@@ -472,6 +472,12 @@ class PrintRoundRobinApp:
             self.metric_vars[key] = var
             ttk.Label(card, textvariable=var, style="Metric.TLabel").pack()
 
+        ttk.Label(
+            self.monitor_tab,
+            text="* Число страниц определяется для обычных PDF и PostScript. Для остальных RAW-форматов показывается «—».",
+            style="Muted.TLabel",
+        ).pack(anchor="w", pady=(0, 5))
+
         legend = ttk.Frame(self.monitor_tab)
         legend.pack(fill="x", pady=(0, 5))
         self.legend_items = [

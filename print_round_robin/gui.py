@@ -516,7 +516,7 @@ class PrintRoundRobinApp:
         self._rebuild_printer_cards()
 
         # Отдельная панель показывает фактический ход отправки байтов на RAW TCP.
-        self.transfer_box = ttk.LabelFrame(job_box, text="Текущая передача", padding=(7, 5), height=88)
+        self.transfer_box = ttk.LabelFrame(job_box, text="Текущая передача", padding=(7, 5), height=116)
         self.transfer_box.pack(fill="x", pady=(0, 6))
         self.transfer_box.pack_propagate(False)
         self.transfer_rows: dict[str, dict] = {}
@@ -1460,16 +1460,17 @@ class PrintRoundRobinApp:
 
         has_critical = any(item.get("severity") == "critical" for item in errors)
         has_warning = any(item.get("severity") == "warning" for item in errors)
-        if tcp_down and snmp_available is not True:
-            state, title = "offline", "НЕТ СВЯЗИ"
-        elif has_critical:
+        if has_critical:
             state, title = "error", "КРИТИЧЕСКАЯ ОШИБКА"
         elif has_warning:
             state, title = "warning", "ПРЕДУПРЕЖДЕНИЕ"
+        elif current_job:
+            # Активная передача важнее устаревшего результата TCP-проверки.
+            state, title = "transfer", "ПЕРЕДАЁТ ЗАДАНИЕ"
+        elif tcp_down and snmp_available is not True:
+            state, title = "offline", "НЕТ СВЯЗИ"
         elif tcp_down and snmp_available is True:
             state, title = "warning", "RAW-ПОРТ НЕДОСТУПЕН"
-        elif current_job:
-            state, title = "transfer", "ПЕРЕДАЁТ ЗАДАНИЕ"
         elif self.config.snmp_enabled and snmp_available is False:
             state, title = "warning", "SNMP НЕ ОТВЕЧАЕТ"
         elif self.config.snmp_enabled and not device:
@@ -1490,16 +1491,16 @@ class PrintRoundRobinApp:
             state, title = "unknown", "СЕТЬ ДОСТУПНА"
 
         error_texts = [str(item.get("text", "")).strip() for item in errors if item.get("text")]
-        if tcp_down and snmp_available is not True:
-            detail = "Нет ответа от RAW TCP и SNMP"
-        elif error_texts:
+        if error_texts:
             detail = "  •  ".join(error_texts[:2])
             if len(error_texts) > 2:
                 detail += f"  (+{len(error_texts) - 2})"
-        elif tcp_down and snmp_available is True:
-            detail = "Устройство отвечает по SNMP, но RAW TCP-порт печати недоступен"
         elif current_job:
             detail = f"Документ: {current_job}"
+        elif tcp_down and snmp_available is not True:
+            detail = "Нет ответа от RAW TCP и SNMP"
+        elif tcp_down and snmp_available is True:
+            detail = "Устройство отвечает по SNMP, но RAW TCP-порт печати недоступен"
         elif snmp_available is False:
             detail = "Сеть доступна, но SNMP не отвечает. Проверьте SNMP v1/v2c и community."
         elif device:
@@ -1522,8 +1523,11 @@ class PrintRoundRobinApp:
         if consumable_warnings:
             toner_text = "  •  ".join(consumable_warnings[:2])
 
-        network_text = "RAW: нет ответа" if tcp_down else (
-            "RAW: OK" if row.get("status") == "Доступен" else "RAW: проверка"
+        network_text = (
+            "RAW: передача" if current_job else
+            "RAW: нет ответа" if tcp_down else
+            "RAW: OK" if row.get("status") == "Доступен" else
+            "RAW: проверка"
         )
         if not self.config.snmp_enabled:
             snmp_text = "SNMP: выкл."
@@ -1760,13 +1764,21 @@ class PrintRoundRobinApp:
         row = self.transfer_rows.get(job_id)
         if row is None:
             frame = ttk.Frame(self.transfer_box)
-            title = ttk.Label(frame, width=38, anchor="w")
-            title.pack(side="left", padx=(0, 8))
-            progress = ttk.Progressbar(frame, mode="determinate", maximum=100, length=260)
+            title = ttk.Label(
+                frame, anchor="w", justify="left", wraplength=1100,
+            )
+            title.pack(fill="x", pady=(0, 2))
+            progress_line = ttk.Frame(frame)
+            progress_line.pack(fill="x")
+            progress = ttk.Progressbar(
+                progress_line, mode="determinate", maximum=100, length=260,
+            )
             progress.pack(side="left", fill="x", expand=True, padx=(0, 8))
-            value = ttk.Label(frame, width=34, anchor="e")
+            value = ttk.Label(progress_line, width=34, anchor="e")
             value.pack(side="right")
-            row = {"frame": frame, "title": title, "progress": progress, "value": value}
+            row = {
+                "frame": frame, "title": title, "progress": progress, "value": value,
+            }
             self.transfer_rows[job_id] = row
             self._layout_transfer_rows()
 
@@ -1775,7 +1787,7 @@ class PrintRoundRobinApp:
         percent = min(100.0, sent * 100.0 / size) if size else 0.0
         filename = str(job.get("filename") or job_id)
         printer = str(job.get("printer") or "принтер не выбран")
-        row["title"].configure(text=f"{filename[:34]}  →  {printer}")
+        row["title"].configure(text=f"{filename}  →  {printer}")
         row["progress"].configure(value=percent)
         row["value"].configure(
             text=f"{percent:.1f}%  •  {sent / 1048576:.2f} / {size / 1048576:.2f} МБ"

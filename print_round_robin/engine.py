@@ -561,6 +561,11 @@ class RoundRobinEngine:
                         return
                     printer = futures[future]
                     runtime = self._printer_runtime[printer.host]
+                    # Результат проверки, начатой до резервирования принтера,
+                    # нельзя применять во время/сразу после передачи: принтер
+                    # может временно не принимать второе TCP-соединение.
+                    if runtime.busy or self._printer_locks[printer.host].locked():
+                        continue
                     try:
                         available, error = future.result()
                         runtime.available = available

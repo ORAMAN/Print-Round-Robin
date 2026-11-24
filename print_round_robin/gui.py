@@ -461,7 +461,8 @@ class PrintRoundRobinApp:
             ("queued", "Ожидает"),
             ("active", "Передаётся"),
             ("completed", "Передано"),
-            ("failed", "На проверке"),
+            ("failed", "Ошибки"),
+            ("pages", "Страниц*"),
         )
         for col, (key, title) in enumerate(labels):
             card = ttk.LabelFrame(metrics, text=title, padding=8)
@@ -510,9 +511,9 @@ class PrintRoundRobinApp:
 
         self.job_tree = self._tree(
             job_box,
-            ("id", "status", "size", "printer", "received", "progress"),
-            ("ID задания", "Состояние", "Размер", "Принтер", "Принято", "Передача / ошибка"),
-            (205, 150, 100, 140, 145, 310),
+            ("id", "status", "size", "pages", "printer", "received", "progress"),
+            ("ID задания", "Состояние", "Размер", "Страниц", "Принтер", "Принято", "Передача / ошибка"),
+            (190, 145, 95, 75, 125, 135, 290),
         )
 
     def _create_printer_card(self, printer: PrinterConfig, index: int) -> None:
@@ -1413,6 +1414,8 @@ class PrintRoundRobinApp:
                 snapshot = self.engine.snapshot()
                 for key in ("received", "queued", "active", "completed", "failed"):
                     self.metric_vars[key].set(str(snapshot.get(key, 0)))
+                page_total = snapshot.get("pages")
+                self.metric_vars["pages"].set(str(page_total) if page_total is not None else "—")
                 for job in snapshot.get("jobs", []):
                     self._upsert_job(job)
             except Exception:
@@ -1706,8 +1709,10 @@ class PrintRoundRobinApp:
             f"Отправлено {sent / 1024:.1f} КБ из {size_label}"
             if sent and job.get("status") == "Печатается" else job.get("error", "")
         )
+        page_count = job.get("page_count")
+        pages_label = str(page_count) if page_count is not None else "—"
         values = (
-            job_id, job.get("status", ""), size_label,
+            job_id, job.get("status", ""), size_label, pages_label,
             job.get("printer", "") or "—", received, detail,
         )
         status = job.get("status", "")

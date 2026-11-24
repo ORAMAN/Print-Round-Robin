@@ -1485,7 +1485,8 @@ class PrintRoundRobinApp:
         elif self.config.snmp_enabled and not device and not web_available:
             state, title = "unknown", "ОПРОС SNMP..."
         elif device or web_available:
-            status_source = device if device and not device_stale else web
+            snmp_state = device.get("state") if device and not device_stale else "unknown"
+            status_source = device if snmp_state not in (None, "", "unknown") else web
             state = status_source.get("state", "unknown")
             title = {
                 "ready": "ГОТОВ • ОЖИДАЕТ",

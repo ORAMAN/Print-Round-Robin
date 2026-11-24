@@ -244,3 +244,65 @@ def test_explicit_waste_toner_full_text_is_kept_even_with_generic_severity():
         "text": "Бункер отработанного тонера заполнен — требуется замена",
         "severity": "critical",
     }]
+
+
+def test_low_toner_error_bit_is_an_advisory_not_an_operational_fault(monkeypatch):
+    from print_round_robin import snmp_monitor
+
+    class FakeClient:
+        version = 1
+
+        def __init__(self, host, community, port, timeout, version):
+            self.version = 1
+
+        def get(self, oid):
+            values = {
+                f"{snmp_monitor.HR_DEVICE_DESCRIPTION}.1": b"Kyocera ECOSYS PA6000x",
+                f"{snmp_monitor.HR_PRINTER_STATUS}.1": 3,
+                f"{snmp_monitor.HR_DEVICE_STATUS}.1": 3,
+                f"{snmp_monitor.HR_PRINTER_ERRORS}.1": b"\\x20\\x00",
+                f"{snmp_monitor.PRT_CONSOLE_DISPLAY_TEXT}.1.1": b"Ready to print",
+            }
+            if oid not in values:
+                return None
+            value = values[oid]
+            return snmp_monitor.VarBind(oid, 0x04 if isinstance(value, bytes) else 0x02, value)
+
+        def walk(self, oid, max_rows=80):
+            return []
+
+    monkeypatch.setattr(snmp_monitor, "SnmpClient", FakeClient)
+    result = snmp_monitor.poll_printer("192.0.2.83", version="2c")
+    assert result["state"] == "ready"
+    assert result["errors"] == []
+    assert result["advisories"] == [{"text": "Мало тонера", "severity": "info"}]
+
+
+def test_paper_jam_remains_critical_when_low_toner_is_also_reported(monkeypatch):
+    from print_round_robin import snmp_monitor
+
+    class FakeClient:
+        def __init__(self, host, community, port, timeout, version):
+            self.version = 1
+
+        def get(self, oid):
+            values = {
+                f"{snmp_monitor.HR_DEVICE_DESCRIPTION}.1": b"Kyocera ECOSYS PA6000x",
+                f"{snmp_monitor.HR_PRINTER_STATUS}.1": 3,
+                f"{snmp_monitor.HR_DEVICE_STATUS}.1": 3,
+                f"{snmp_monitor.HR_PRINTER_ERRORS}.1": b"\\x24\\x00",
+                f"{snmp_monitor.PRT_CONSOLE_DISPLAY_TEXT}.1.1": b"Paper jam",
+            }
+            if oid not in values:
+                return None
+            value = values[oid]
+            return snmp_monitor.VarBind(oid, 0x04 if isinstance(value, bytes) else 0x02, value)
+
+        def walk(self, oid, max_rows=80):
+            return []
+
+    monkeypatch.setattr(snmp_monitor, "SnmpClient", FakeClient)
+    result = snmp_monitor.poll_printer("192.0.2.84", version="2c")
+    assert result["state"] == "error"
+    assert any(item["text"] == "Замятие бумаги" for item in result["errors"])
+    assert any(item["text"] == "Мало тонера" for item in result["advisories"])

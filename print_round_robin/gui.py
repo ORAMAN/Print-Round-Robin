@@ -61,6 +61,8 @@ def _format_supply_line(supply: dict) -> str:
         return ""
 
     kind = str(supply.get("kind", "")).casefold()
+    if kind == "waste_toner":
+        return ""
     model = str(supply.get("model") or supply.get("description") or "").strip()
     if kind == "toner" and model and model.casefold() not in {"toner", "тонер"}:
         if model.casefold() != name.casefold():
@@ -1554,6 +1556,9 @@ class PrintRoundRobinApp:
         supplies = [] if device_stale else (device.get("supplies") or [])
         if not supplies and not web_stale:
             supplies = web.get("supplies") or []
+        # Do not display the waste-toner box as a consumable: this model does
+        # not provide a reliable reading for it. Explicit hardware alerts stay visible above.
+        supplies = [item for item in supplies if item.get("kind") != "waste_toner"]
         supply_parts = [line for line in (_format_supply_line(item) for item in supplies) if line]
         # Separate supplies into lines: long Kyocera consumable descriptions
         # should wrap inside the card instead of running into its neighbor.

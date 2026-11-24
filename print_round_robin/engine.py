@@ -525,25 +525,47 @@ class RoundRobinEngine:
                 LOG.exception("Не удалось перенести прежнее задание %s", old_file)
 
     def _health_loop(self) -> None:
-        while not self._stop.is_set():
-            for printer in [p for p in self.config.printers if p.enabled]:
-                if self._stop.is_set():
-                    return
-                runtime = self._printer_runtime[printer.host]
-                if runtime.busy:
-                    continue
-                try:
-                    with socket.create_connection(
-                        (printer.host, printer.port), timeout=self.config.connect_timeout
-                    ):
-                        runtime.available = True
-                        runtime.last_error = ""
-                except OSError as exc:
-                    runtime.available = False
-                    runtime.last_error = str(exc)
-                runtime.checked_at = time.time()
-            self._emit_printer_status()
-            self._stop.wait(self.config.health_interval)
+        """Check RAW ports concurrently so one slow printer cannot delay all others."""
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        printers = [p for p in self.config.printers if p.enabled]
+        with ThreadPoolExecutor(max_workers=min(20, len(printers) or 1),
+                                thread_name_prefix="PrinterTCP") as pool:
+            next_poll = time.monotonic()
+            while not self._stop.is_set():
+                futures = {}
+                for printer in printers:
+                    runtime = self._printer_runtime[printer.host]
+                    if runtime.busy:
+                        continue
+                    futures[pool.submit(
+                        self._check_printer_tcp, printer
+                    )] = printer
+                for future in as_completed(futures):
+                    if self._stop.is_set():
+                        return
+                    printer = futures[future]
+                    runtime = self._printer_runtime[printer.host]
+                    try:
+                        available, error = future.result()
+                        runtime.available = available
+                        runtime.last_error = error
+                    except Exception as exc:
+                        runtime.available = False
+                        runtime.last_error = str(exc)
+                    runtime.checked_at = time.time()
+                    self._emit_printer_status()
+                next_poll += self.config.health_interval
+                self._stop.wait(max(0.0, next_poll - time.monotonic()))
+
+    def _check_printer_tcp(self, printer: PrinterConfig) -> tuple[bool, str]:
+        try:
+            with socket.create_connection(
+                (printer.host, printer.port), timeout=self.config.connect_timeout
+            ):
+                return True, ""
+        except OSError as exc:
+            return False, str(exc)
 
     def _snmp_loop(self) -> None:
         """Poll all printers concurrently via SNMP without blocking print workers."""
@@ -551,6 +573,7 @@ class RoundRobinEngine:
 
         hosts = [p for p in self.config.printers if p.enabled]
         with ThreadPoolExecutor(max_workers=min(10, len(hosts) or 1), thread_name_prefix="PrinterSNMP") as pool:
+            next_poll = time.monotonic()
             while not self._stop.is_set():
                 future_map = {
                     pool.submit(
@@ -576,12 +599,14 @@ class RoundRobinEngine:
                     except Exception as exc:
                         runtime.snmp_available = False
                         runtime.snmp_error = str(exc)
-                        # Preserve last good SNMP data only for diagnostics; mark it stale.
                         if runtime.device_status:
                             runtime.device_status = dict(runtime.device_status)
                             runtime.device_status["stale"] = True
                     self._emit_printer_status()
-                self._stop.wait(self.config.snmp_interval)
+                # Keep a stable start-to-start cadence; do not add the full poll
+                # duration to the configured interval on every cycle.
+                next_poll += self.config.snmp_interval
+                self._stop.wait(max(0.0, next_poll - time.monotonic()))
 
     def _emit_printer_status(self) -> None:
         rows = []

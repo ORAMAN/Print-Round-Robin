@@ -262,9 +262,10 @@ PRT_ALERT_DESCRIPTION = "1.3.6.1.2.1.43.18.1.1.8"
 
 
 _ERROR_BITS = (
-    (0, "Мало бумаги", "warning"),
+    # Low-paper / low-toner are supply notices. They do not prevent printing.
+    (0, "Мало бумаги", "info"),
     (1, "Нет бумаги", "critical"),
-    (2, "Мало тонера", "warning"),
+    (2, "Мало тонера", "info"),
     (3, "Тонер закончился", "critical"),
     (4, "Открыта крышка", "critical"),
     (5, "Замятие бумаги", "critical"),
@@ -374,7 +375,18 @@ def _poll_alerts(client: SnmpClient) -> list[dict]:
         severity = severities.get(suffix)
         # RFC 3805: critical(3), warning(4), warningBinaryChangeEvent(5), other(1).
         level = "critical" if severity == 3 else "warning" if severity in (4, 5) else "info"
-        if any(token in description.casefold() for token in (
+        lower_description = description.casefold()
+        if any(token in lower_description for token in (
+            "low toner", "toner low", "мало тонера", "низкий уровень тонера",
+        )):
+            alerts.append({"text": "Мало тонера", "severity": "info"})
+            continue
+        if any(token in lower_description for token in (
+            "low paper", "paper low", "paper is low", "мало бумаги", "низкий уровень бумаги",
+        )):
+            alerts.append({"text": "Мало бумаги", "severity": "info"})
+            continue
+        if any(token in lower_description for token in (
             "waste toner box", "waste toner container",
             "контейнер отработанного тонера", "бункер отработанного тонера",
         )):
@@ -524,13 +536,26 @@ def poll_printer(host: str, community: str = "public", port: int = 161,
         name = supply["name"].casefold()
         if supply["percent"] is not None and any(word in name for word in ("toner", "тонер")):
             if supply["percent"] <= 5:
-                supply_warning.append({"text": f"Тонер почти закончился ({supply['percent']}%)", "severity": "critical"})
+                supply_warning.append({"text": f"Тонер почти закончился ({supply['percent']}%)", "severity": "info"})
             elif supply["percent"] <= 15:
-                supply_warning.append({"text": f"Мало тонера ({supply['percent']}%)", "severity": "warning"})
+                supply_warning.append({"text": f"Мало тонера ({supply['percent']}%)", "severity": "info"})
     for item in supply_warning:
         if item["text"] not in seen:
             errors.append(item)
             seen.add(item["text"])
+
+    # Keep consumable notices separate from operational warnings and faults.
+    notices = [item for item in errors if item.get("severity") == "info"]
+    errors = [item for item in errors if item.get("severity") != "info"]
+
+    # Some printers raise the generic hrDeviceStatus=warning flag for low supplies.
+    # When a specific consumable notice exists and the printer is operational,
+    # do not let that generic host-resource flag mask Ready / Printing.
+    if notices and printer_status in (3, 4, 5):
+        errors = [
+            item for item in errors
+            if item.get("text") != "Устройство сообщает состояние WARNING (hrDeviceStatus=3)"
+        ]
 
     critical = any(item["severity"] == "critical" for item in errors)
     warning = any(item["severity"] == "warning" for item in errors)
@@ -567,6 +592,7 @@ def poll_printer(host: str, community: str = "public", port: int = 161,
         "serial_number": serial_number,
         "printer_index": printer_index,
         "errors": errors,
+        "notices": notices,
         "alerts": alerts,
         "supplies": supplies,
         "toner_text": ", ".join(toner_values) if toner_values else "Уровень тонера не сообщается",

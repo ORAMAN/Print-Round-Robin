@@ -1,4 +1,4 @@
-from print_round_robin.gui import _format_supply_line
+from print_round_robin.gui import _format_supply_line, _partition_printer_messages
 
 
 def test_toner_card_line_includes_cartridge_model():
@@ -18,3 +18,25 @@ def test_waste_toner_supply_line_is_hidden_when_not_reported():
         "status_text": "Заполнение не сообщается",
         "percent": None,
     }) == ""
+
+
+
+def test_low_toner_and_low_paper_are_informational_even_in_legacy_warning_data():
+    operational, notices = _partition_printer_messages([
+        {"text": "Мало тонера (12%)", "severity": "warning"},
+        {"text": "Мало бумаги", "severity": "warning"},
+        {"text": "Замятие бумаги", "severity": "critical"},
+    ])
+
+    assert [item["text"] for item in operational] == ["Замятие бумаги"]
+    assert [item["text"] for item in notices] == ["Мало тонера (12%)", "Мало бумаги"]
+
+
+def test_explicit_info_messages_are_separated_and_deduplicated():
+    operational, notices = _partition_printer_messages(
+        [{"text": "Мало тонера", "severity": "info"}],
+        [{"text": "Мало тонера", "severity": "info"}, {"text": "Мало бумаги", "severity": "info"}],
+    )
+
+    assert operational == []
+    assert [item["text"] for item in notices] == ["Мало тонера", "Мало бумаги"]

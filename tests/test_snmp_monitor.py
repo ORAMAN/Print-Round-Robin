@@ -21,11 +21,11 @@ def test_oid_encoder_round_trips_standard_printer_mib_oid():
 def test_hr_printer_error_bits_are_decoded_most_significant_first():
     # Bit 0 = lowPaper, bit 2 = lowToner, bit 5 = jammed, bit 13 = inputTrayEmpty.
     result = decode_error_bits(bytes((0b10100100, 0b00000100)))
-    assert [item["text"] for item in result] == [
-        "Мало бумаги",
-        "Мало тонера",
-        "Замятие бумаги",
-        "Входной лоток пуст",
+    assert [(item["text"], item["severity"]) for item in result] == [
+        ("Мало бумаги", "info"),
+        ("Мало тонера", "info"),
+        ("Замятие бумаги", "critical"),
+        ("Входной лоток пуст", "warning"),
     ]
 
 
@@ -244,3 +244,110 @@ def test_explicit_waste_toner_full_text_is_kept_even_with_generic_severity():
         "text": "Бункер отработанного тонера заполнен — требуется замена",
         "severity": "critical",
     }]
+
+
+
+def test_low_toner_and_low_paper_bits_do_not_override_printing_state(monkeypatch):
+    from print_round_robin import snmp_monitor
+
+    class FakeClient:
+        def __init__(self, host, community, port, timeout, version):
+            self.version = 1
+
+        def get(self, oid):
+            values = {
+                f"{snmp_monitor.HR_DEVICE_DESCRIPTION}.1": b"Kyocera ECOSYS PA6000x",
+                f"{snmp_monitor.HR_PRINTER_STATUS}.1": 4,
+                f"{snmp_monitor.HR_DEVICE_STATUS}.1": 3,
+                f"{snmp_monitor.HR_PRINTER_ERRORS}.1": b"\xA0\x00",
+            }
+            if oid not in values:
+                return None
+            value = values[oid]
+            tag = 0x04 if isinstance(value, bytes) else 0x02
+            return snmp_monitor.VarBind(oid, tag, value)
+
+        def walk(self, oid, max_rows=80):
+            return []
+
+    monkeypatch.setattr(snmp_monitor, "SnmpClient", FakeClient)
+    result = snmp_monitor.poll_printer("192.0.2.83", version="2c")
+
+    assert result["state"] == "printing"
+    assert result["errors"] == []
+    assert [item["text"] for item in result["notices"]] == [
+        "Мало бумаги",
+        "Мало тонера",
+    ]
+
+
+def test_toner_below_five_percent_is_informational_not_critical(monkeypatch):
+    from print_round_robin import snmp_monitor
+
+    class FakeClient:
+        def __init__(self, host, community, port, timeout, version):
+            self.version = 1
+
+        def get(self, oid):
+            values = {
+                f"{snmp_monitor.HR_DEVICE_DESCRIPTION}.1": b"Kyocera ECOSYS PA6000x",
+                f"{snmp_monitor.HR_PRINTER_STATUS}.1": 3,
+                f"{snmp_monitor.HR_DEVICE_STATUS}.1": 2,
+                f"{snmp_monitor.HR_PRINTER_ERRORS}.1": b"\x00\x00",
+            }
+            if oid not in values:
+                return None
+            value = values[oid]
+            tag = 0x04 if isinstance(value, bytes) else 0x02
+            return snmp_monitor.VarBind(oid, tag, value)
+
+        def walk(self, oid, max_rows=80):
+            rows = {
+                snmp_monitor.PRT_SUPPLY_TYPE: [
+                    snmp_monitor.VarBind(oid + ".1", 0x02, 3)
+                ],
+                snmp_monitor.PRT_SUPPLY_DESCRIPTION: [
+                    snmp_monitor.VarBind(oid + ".1", 0x04, b"TK-3190")
+                ],
+                snmp_monitor.PRT_SUPPLY_CAPACITY: [
+                    snmp_monitor.VarBind(oid + ".1", 0x02, 100)
+                ],
+                snmp_monitor.PRT_SUPPLY_LEVEL: [
+                    snmp_monitor.VarBind(oid + ".1", 0x02, 4)
+                ],
+            }
+            return rows.get(oid, [])
+
+    monkeypatch.setattr(snmp_monitor, "SnmpClient", FakeClient)
+    result = snmp_monitor.poll_printer("192.0.2.84", version="2c")
+
+    assert result["state"] == "ready"
+    assert result["errors"] == []
+    assert result["supplies"][0]["percent"] == 4
+    assert result["notices"] == [{
+        "text": "Тонер почти закончился (4%)",
+        "severity": "info",
+    }]
+
+
+def test_low_consumable_snmp_alerts_are_informational_even_if_agent_says_critical():
+    from print_round_robin import snmp_monitor
+
+    class FakeClient:
+        def walk(self, oid, max_rows=80):
+            if oid == snmp_monitor.PRT_ALERT_DESCRIPTION:
+                return [
+                    snmp_monitor.VarBind(oid + ".1", 0x04, b"Low toner"),
+                    snmp_monitor.VarBind(oid + ".2", 0x04, b"Paper low"),
+                ]
+            if oid == snmp_monitor.PRT_ALERT_SEVERITY:
+                return [
+                    snmp_monitor.VarBind(oid + ".1", 0x02, 3),
+                    snmp_monitor.VarBind(oid + ".2", 0x02, 3),
+                ]
+            return []
+
+    assert snmp_monitor._poll_alerts(FakeClient()) == [
+        {"text": "Мало тонера", "severity": "info"},
+        {"text": "Мало бумаги", "severity": "info"},
+    ]

@@ -402,10 +402,27 @@ def poll_printer(host: str, community: str = "public", port: int = 161,
         host, community, port, timeout, version
     )
 
+    # Independent SNMP requests are sent concurrently. A device that silently
+    # drops an optional MIB request therefore cannot delay every other field.
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(max_workers=7, thread_name_prefix="SNMPFields") as pool:
+        status_future = pool.submit(_safe_get, client, f"{HR_PRINTER_STATUS}.1")
+        device_future = pool.submit(_safe_get, client, f"{HR_DEVICE_STATUS}.1")
+        console_future = pool.submit(_safe_get, client, f"{PRT_CONSOLE_DISPLAY_TEXT}.1.1")
+        serial_future = pool.submit(_safe_get, client, f"{PRT_GENERAL_SERIAL_NUMBER}.1")
+        alerts_future = pool.submit(_poll_alerts, client)
+        supplies_future = pool.submit(_poll_supply_data, client)
+
+        status = status_future.result()
+        device_status_item = device_future.result()
+        console_item = console_future.result()
+        serial_item = serial_future.result()
+        alerts = alerts_future.result()
+        supplies = supplies_future.result()
+
     printer_index = None
     printer_status = None
-    # The VBA sample reads hrPrinterStatus.1 directly. Try that exact instance first.
-    status = _safe_get(client, f"{HR_PRINTER_STATUS}.1")
     if status is not None and isinstance(status.value, int):
         printer_index = "1"
         printer_status = status.value
@@ -424,27 +441,21 @@ def poll_printer(host: str, community: str = "public", port: int = 161,
             errors = decode_error_bits(error.value)
 
     # hrDeviceStatus is the warning/status value read by the VBA workbook.
-    device_status_item = _safe_get(client, f"{HR_DEVICE_STATUS}.1")
     device_status = device_status_item.value if device_status_item else None
     if device_status == 3:
         errors.append({"text": "Устройство сообщает состояние WARNING (hrDeviceStatus=3)", "severity": "warning"})
     elif device_status == 5:
         errors.append({"text": "Устройство сообщает состояние DOWN (hrDeviceStatus=5)", "severity": "critical"})
 
-    console_item = _safe_get(client, f"{PRT_CONSOLE_DISPLAY_TEXT}.1.1")
     console_message = _text(console_item.value) if console_item and console_item.value is not None else ""
-    serial_item = _safe_get(client, f"{PRT_GENERAL_SERIAL_NUMBER}.1")
     serial_number = _text(serial_item.value) if serial_item and serial_item.value is not None else ""
 
-    alerts = _poll_alerts(client)
     # Alerts provide detailed device-specific wording; de-duplicate against Host MIB bits.
     seen = {x["text"].casefold() for x in errors}
     for alert in alerts:
         if alert["text"].casefold() not in seen:
             errors.append(alert)
             seen.add(alert["text"].casefold())
-
-    supplies = _poll_supply_data(client)
     supply_warning = []
     for supply in supplies:
         name = supply["name"].casefold()

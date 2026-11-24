@@ -378,12 +378,21 @@ def _poll_alerts(client: SnmpClient) -> list[dict]:
             "waste toner box", "waste toner container",
             "контейнер отработанного тонера", "бункер отработанного тонера",
         )):
-            # Ignore generic/informational mentions. Only device-reported
-            # warning and critical severities represent actionable status.
-            if severity == 3:
+            lower = description.casefold()
+            explicit_full = any(token in lower for token in (
+                "full", "replace", "заполнен", "замен",
+            ))
+            explicit_warning = any(token in lower for token in (
+                "near full", "almost full", "почти заполнен", "требует внимания",
+            ))
+            # Ignore a bare component label. Preserve actionable text even if
+            # the device reports an unhelpful generic severity code.
+            if severity == 3 or explicit_full:
                 description = "Бункер отработанного тонера заполнен — требуется замена"
-            elif severity in (4, 5):
+                level = "critical"
+            elif severity in (4, 5) or explicit_warning:
                 description = "Бункер отработанного тонера требует внимания"
+                level = "warning"
             else:
                 continue
         alerts.append({"text": description, "severity": level})

@@ -117,8 +117,6 @@ def _classify_status(visible: str) -> tuple[str, str, list[dict[str, str]]]:
         (("waste toner box full", "waste toner container full", "replace waste toner box", "waste toner box is full", "контейнер отработанного тонера заполнен", "бункер отработанного тонера заполнен"), "Бункер отработанного тонера заполнен — требуется замена", "critical"),
         (("waste toner box near full", "waste toner box almost full", "waste toner box warning", "контейнер отработанного тонера почти заполнен", "скоро заполнится бункер отработанного тонера"), "Бункер отработанного тонера почти заполнен", "warning"),
         (("toner empty", "replace toner", "тонер закончился", "замените тонер"), "Требуется замена тонера", "critical"),
-        (("low toner", "toner low", "мало тонера", "низкий уровень тонера"), "Мало тонера", "warning"),
-        (("low paper", "paper low", "мало бумаги"), "Мало бумаги", "warning"),
     )
     for needles, message, severity in rules:
         if any(needle in lower for needle in needles):
@@ -149,6 +147,17 @@ def _classify_status(visible: str) -> tuple[str, str, list[dict[str, str]]]:
     return status, status_message, errors
 
 
+def _classify_advisories(visible: str) -> list[dict[str, str]]:
+    """Extract non-blocking consumable notices separately from printer faults."""
+    lower = re.sub(r"\\s+", " ", visible).casefold()
+    advisories = []
+    if any(token in lower for token in ("low toner", "toner low", "мало тонера", "низкий уровень тонера")):
+        advisories.append({"text": "Мало тонера", "severity": "info"})
+    if any(token in lower for token in ("low paper", "paper low", "мало бумаги")):
+        advisories.append({"text": "Мало бумаги", "severity": "info"})
+    return advisories
+
+
 def poll_kyocera_web(host: str, timeout: float = WEB_TIMEOUT) -> dict:
     """Probe standard WSD HTTP endpoints and read public Command Center RX status."""
     wsd_port = None
@@ -169,6 +178,7 @@ def poll_kyocera_web(host: str, timeout: float = WEB_TIMEOUT) -> dict:
             "web_url": None,
             "supplies": [],
             "errors": [],
+            "advisories": [],
             "state": "unknown",
             "status_message": "",
             "polled_at": time.time(),
@@ -178,8 +188,14 @@ def poll_kyocera_web(host: str, timeout: float = WEB_TIMEOUT) -> dict:
     visible = _visible_text(source)
     percent = _toner_percent(source, visible)
     state, status_message, errors = _classify_status(visible)
+    advisories = _classify_advisories(visible)
     supplies = ([{"name": "Тонер", "kind": "toner", "percent": percent, "source": "Command Center RX"}]
                 if percent is not None else [])
+    if percent is not None and percent <= 15:
+        advisory = "Тонер почти закончился" if percent <= 5 else "Мало тонера"
+        supplies[0]["advisory"] = advisory
+        if not any(item["text"] == advisory for item in advisories):
+            advisories.append({"text": f"{advisory} ({percent}%)", "severity": "info"})
     return {
         "wsd_available": wsd_port is not None,
         "wsd_port": wsd_port,
@@ -187,6 +203,7 @@ def poll_kyocera_web(host: str, timeout: float = WEB_TIMEOUT) -> dict:
         "web_url": url,
         "supplies": supplies,
         "errors": errors,
+        "advisories": advisories,
         "state": state,
         "status_message": status_message,
         "polled_at": time.time(),

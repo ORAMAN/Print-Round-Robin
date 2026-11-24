@@ -138,3 +138,109 @@ def test_poll_printer_remains_available_when_optional_mib_tables_time_out(monkey
     assert result["name"] == "Printer model"
     assert result["supplies"] == []
     assert result["alerts"] == []
+
+
+
+def test_waste_toner_supply_is_not_displayed_even_if_mib_has_a_level():
+    from print_round_robin import snmp_monitor
+
+    class FakeClient:
+        def walk(self, oid, max_rows=80):
+            rows = {
+                snmp_monitor.PRT_SUPPLY_TYPE: [snmp_monitor.VarBind(oid + ".1", 0x02, 4)],
+                snmp_monitor.PRT_SUPPLY_DESCRIPTION: [snmp_monitor.VarBind(oid + ".1", 0x04, b"Waste Toner Box")],
+                snmp_monitor.PRT_SUPPLY_CAPACITY: [snmp_monitor.VarBind(oid + ".1", 0x02, 100)],
+                snmp_monitor.PRT_SUPPLY_LEVEL: [snmp_monitor.VarBind(oid + ".1", 0x02, 90)],
+            }
+            return rows.get(oid, [])
+
+    result = snmp_monitor._poll_supply_data(FakeClient())
+    assert result == []
+
+
+def test_toner_supply_keeps_original_cartridge_model_description():
+    from print_round_robin import snmp_monitor
+
+    class FakeClient:
+        def walk(self, oid, max_rows=80):
+            rows = {
+                snmp_monitor.PRT_SUPPLY_TYPE: [snmp_monitor.VarBind(oid + ".1", 0x02, 3)],
+                snmp_monitor.PRT_SUPPLY_DESCRIPTION: [snmp_monitor.VarBind(oid + ".1", 0x04, b"TK-3190")],
+                snmp_monitor.PRT_SUPPLY_CAPACITY: [snmp_monitor.VarBind(oid + ".1", 0x02, 100)],
+                snmp_monitor.PRT_SUPPLY_LEVEL: [snmp_monitor.VarBind(oid + ".1", 0x02, 76)],
+            }
+            return rows.get(oid, [])
+
+    result = snmp_monitor._poll_supply_data(FakeClient())
+    assert len(result) == 1
+    assert result[0]["name"] == "Тонер"
+    assert result[0]["kind"] == "toner"
+    assert result[0]["model"] == "TK-3190"
+    assert result[0]["percent"] == 76
+
+
+def test_waste_toner_box_unknown_level_is_not_reported_as_empty():
+    from print_round_robin import snmp_monitor
+
+    class FakeClient:
+        def walk(self, oid, max_rows=80):
+            rows = {
+                snmp_monitor.PRT_SUPPLY_TYPE: [snmp_monitor.VarBind(oid + ".1", 0x02, 4)],
+                snmp_monitor.PRT_SUPPLY_DESCRIPTION: [snmp_monitor.VarBind(oid + ".1", 0x04, b"Waste Toner Box")],
+                snmp_monitor.PRT_SUPPLY_CAPACITY: [snmp_monitor.VarBind(oid + ".1", 0x02, 100)],
+                snmp_monitor.PRT_SUPPLY_LEVEL: [snmp_monitor.VarBind(oid + ".1", 0x02, -1)],
+            }
+            return rows.get(oid, [])
+
+    result = snmp_monitor._poll_supply_data(FakeClient())
+    assert result == []
+
+
+def test_waste_toner_label_without_actionable_alert_is_ignored():
+    from print_round_robin import snmp_monitor
+
+    class FakeClient:
+        def walk(self, oid, max_rows=80):
+            if oid == snmp_monitor.PRT_ALERT_DESCRIPTION:
+                return [snmp_monitor.VarBind(oid + ".1", 0x04, b"Waste Toner Box")]
+            if oid == snmp_monitor.PRT_ALERT_SEVERITY:
+                return [snmp_monitor.VarBind(oid + ".1", 0x02, 1)]
+            return []
+
+    assert snmp_monitor._poll_alerts(FakeClient()) == []
+
+
+def test_waste_toner_device_warning_remains_visible_as_real_alert():
+    from print_round_robin import snmp_monitor
+
+    class FakeClient:
+        def walk(self, oid, max_rows=80):
+            if oid == snmp_monitor.PRT_ALERT_DESCRIPTION:
+                return [snmp_monitor.VarBind(oid + ".1", 0x04, b"Waste Toner Box near full")]
+            if oid == snmp_monitor.PRT_ALERT_SEVERITY:
+                return [snmp_monitor.VarBind(oid + ".1", 0x02, 4)]
+            return []
+
+    result = snmp_monitor._poll_alerts(FakeClient())
+    assert result == [{
+        "text": "Бункер отработанного тонера требует внимания",
+        "severity": "warning",
+    }]
+
+
+def test_explicit_waste_toner_full_text_is_kept_even_with_generic_severity():
+    from print_round_robin import snmp_monitor
+
+    class FakeClient:
+        def walk(self, oid, max_rows=80):
+            if oid == snmp_monitor.PRT_ALERT_DESCRIPTION:
+                return [snmp_monitor.VarBind(oid + ".1", 0x04, b"Waste Toner Box Full")]
+            if oid == snmp_monitor.PRT_ALERT_SEVERITY:
+                return [snmp_monitor.VarBind(oid + ".1", 0x02, 1)]
+            return []
+
+    result = snmp_monitor._poll_alerts(FakeClient())
+    assert result == [{
+        "text": "Бункер отработанного тонера заполнен — требуется замена",
+        "severity": "critical",
+    }]

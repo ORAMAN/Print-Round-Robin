@@ -114,6 +114,8 @@ def _classify_status(visible: str) -> tuple[str, str, list[dict[str, str]]]:
         (("paper jam", "jammed", "замят", "застрев"), "Замятие бумаги", "critical"),
         (("cover open", "door open", "крышка открыта", "дверца открыта"), "Открыта крышка", "critical"),
         (("no paper", "out of paper", "paper empty", "нет бумаги", "бумага отсутствует"), "Нет бумаги", "critical"),
+        (("waste toner box full", "waste toner container full", "replace waste toner box", "waste toner box is full", "контейнер отработанного тонера заполнен", "бункер отработанного тонера заполнен"), "Бункер отработанного тонера заполнен — требуется замена", "critical"),
+        (("waste toner box near full", "waste toner box almost full", "waste toner box warning", "контейнер отработанного тонера почти заполнен", "скоро заполнится бункер отработанного тонера"), "Бункер отработанного тонера почти заполнен", "warning"),
         (("toner empty", "replace toner", "тонер закончился", "замените тонер"), "Требуется замена тонера", "critical"),
         (("low toner", "toner low", "мало тонера", "низкий уровень тонера"), "Мало тонера", "warning"),
         (("low paper", "paper low", "мало бумаги"), "Мало бумаги", "warning"),
@@ -176,7 +178,7 @@ def poll_kyocera_web(host: str, timeout: float = WEB_TIMEOUT) -> dict:
     visible = _visible_text(source)
     percent = _toner_percent(source, visible)
     state, status_message, errors = _classify_status(visible)
-    supplies = ([{"name": "Тонер", "percent": percent, "source": "Command Center RX"}]
+    supplies = ([{"name": "Тонер", "kind": "toner", "percent": percent, "source": "Command Center RX"}]
                 if percent is not None else [])
     return {
         "wsd_available": wsd_port is not None,

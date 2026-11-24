@@ -1444,7 +1444,7 @@ class PrintRoundRobinApp:
             row = self._latest_printer_rows.get(host)
             if row is None:
                 self._paint_printer_card(card, "unknown", "ОЖИДАНИЕ", "Нет свежих данных",
-                                         "Тонер: —", "Мониторинг ещё не получил ответ")
+                                         "", "Мониторинг ещё не получил ответ")
                 continue
             self._render_printer_card(card, row)
 
@@ -1508,20 +1508,23 @@ class PrintRoundRobinApp:
         else:
             detail = "Ожидание данных состояния устройства"
 
-        toner_text = (
-            "Последние данные устарели — SNMP не отвечает"
-            if device_stale else
-            device.get("toner_text", "Уровень тонера не сообщается") if device else "Тонер: нет данных"
-        )
+        # Показываем только реально обнаруженные расходные материалы.
+        # Если модель не публикует их через Printer-MIB, строка остаётся пустой,
+        # а не заполняется одинаковым бесполезным сообщением для всех принтеров.
         supplies = [] if device_stale else (device.get("supplies") or [])
-        consumable_warnings = []
+        supply_parts = []
         for supply in supplies:
-            name = str(supply.get("name", ""))
+            name = str(supply.get("name", "")).strip()
+            if not name:
+                continue
             percent = supply.get("percent")
-            if percent is not None and any(word in name.casefold() for word in ("toner", "тонер")):
-                consumable_warnings.append(f"{name}: {percent}%")
-        if consumable_warnings:
-            toner_text = "  •  ".join(consumable_warnings[:2])
+            supply_parts.append(
+                f"{name}: {percent}%" if isinstance(percent, (int, float))
+                else name
+            )
+        supplies_text = "  •  ".join(supply_parts[:3])
+        if len(supply_parts) > 3:
+            supplies_text += f"  (+{len(supply_parts) - 3})"
 
         network_text = (
             "RAW: передача" if current_job else
@@ -1543,7 +1546,7 @@ class PrintRoundRobinApp:
         )
         if current_job:
             footer = f"{footer}  •  ID: {current_job[:14]}"
-        self._paint_printer_card(card, state, title, detail, toner_text, footer)
+        self._paint_printer_card(card, state, title, detail, supplies_text, footer)
 
     def _paint_printer_card(self, card: dict, state: str, title: str,
                             detail: str, toner: str, footer: str) -> None:

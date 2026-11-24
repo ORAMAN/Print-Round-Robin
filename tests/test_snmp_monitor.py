@@ -259,7 +259,7 @@ def test_low_toner_and_low_paper_bits_do_not_override_printing_state(monkeypatch
                 f"{snmp_monitor.HR_DEVICE_DESCRIPTION}.1": b"Kyocera ECOSYS PA6000x",
                 f"{snmp_monitor.HR_PRINTER_STATUS}.1": 4,
                 f"{snmp_monitor.HR_DEVICE_STATUS}.1": 2,
-                f"{snmp_monitor.HR_PRINTER_ERRORS}.1": b"\\xA0\\x00",
+                f"{snmp_monitor.HR_PRINTER_ERRORS}.1": b"\xA0\x00",
             }
             if oid not in values:
                 return None
@@ -293,7 +293,7 @@ def test_toner_below_five_percent_is_informational_not_critical(monkeypatch):
                 f"{snmp_monitor.HR_DEVICE_DESCRIPTION}.1": b"Kyocera ECOSYS PA6000x",
                 f"{snmp_monitor.HR_PRINTER_STATUS}.1": 3,
                 f"{snmp_monitor.HR_DEVICE_STATUS}.1": 2,
-                f"{snmp_monitor.HR_PRINTER_ERRORS}.1": b"\\x00\\x00",
+                f"{snmp_monitor.HR_PRINTER_ERRORS}.1": b"\x00\x00",
             }
             if oid not in values:
                 return None

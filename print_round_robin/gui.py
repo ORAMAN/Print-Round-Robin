@@ -1768,7 +1768,7 @@ class PrintRoundRobinApp:
             value.pack(side="right")
             row = {"frame": frame, "title": title, "progress": progress, "value": value}
             self.transfer_rows[job_id] = row
-        self._layout_transfer_rows()
+            self._layout_transfer_rows()
 
         size = max(0, int(job.get("size", 0)))
         sent = max(0, int(job.get("bytes_sent", 0)))

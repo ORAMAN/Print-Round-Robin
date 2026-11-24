@@ -13,7 +13,7 @@ import ssl
 import time
 from html.parser import HTMLParser
 from urllib.error import HTTPError, URLError
-from urllib.request import ProxyHandler, Request, build_opener
+from urllib.request import HTTPSHandler, ProxyHandler, Request, build_opener
 
 
 WSD_PORTS = (5357, 5358)
@@ -53,13 +53,13 @@ class _VisibleText(HTMLParser):
 
 
 def _read_home_page(host: str, timeout: float) -> tuple[str, str] | tuple[None, None]:
-    opener = build_opener(ProxyHandler({}))
     context = ssl._create_unverified_context()
+    opener = build_opener(ProxyHandler({}), HTTPSHandler(context=context))
     for scheme in ("http", "https"):
         url = f"{scheme}://{host}/"
         request = Request(url, headers={"User-Agent": "PrintRoundRobin/1.0", "Accept": "text/html,*/*"})
         try:
-            response = opener.open(request, timeout=timeout) if scheme == "http" else opener.open(request, timeout=timeout, context=context)
+            response = opener.open(request, timeout=timeout)
             with response:
                 body = response.read(MAX_PAGE_BYTES + 1)
                 if len(body) > MAX_PAGE_BYTES:

@@ -141,7 +141,7 @@ def _classify_status(visible: str) -> tuple[str, str, list[dict[str, str]]]:
         if pos >= 0:
             excerpt = text[pos + len(label):pos + len(label) + 180].strip(" :|-")
             excerpt = re.split(r"\s{2,}|(?:paper|toner|media input)\b", excerpt, maxsplit=1, flags=re.IGNORECASE)[0]
-            if excerpt and len(excerpt) <= 100:
+            if excerpt and len(excerpt) <= 100 and not errors:
                 status_message = excerpt
                 break
     return status, status_message, errors

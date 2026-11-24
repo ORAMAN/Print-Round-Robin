@@ -18,6 +18,7 @@ from typing import Callable
 
 from .config import AppConfig, PrinterConfig, LEGACY_DIR, runtime_dir, load_legacy_next_index
 from .snmp_monitor import poll_printer
+from .pages import detect_page_count
 
 LOG = logging.getLogger("PrintRoundRobin")
 
@@ -28,6 +29,7 @@ class JobInfo:
     filename: str
     status: str
     size: int = 0
+    page_count: int | None = None
     bytes_sent: int = 0
     received_at: float = field(default_factory=time.time)
     printer: str = ""
@@ -38,7 +40,8 @@ class JobInfo:
     def as_dict(self) -> dict:
         return {
             "job_id": self.job_id, "filename": self.filename, "status": self.status,
-            "size": self.size, "bytes_sent": self.bytes_sent, "received_at": self.received_at,
+            "size": self.size, "page_count": self.page_count,
+            "bytes_sent": self.bytes_sent, "received_at": self.received_at,
             "printer": self.printer, "started_at": self.started_at,
             "finished_at": self.finished_at, "error": self.error,
         }
@@ -93,7 +96,7 @@ class RoundRobinEngine:
         self._printer_runtime = {p.host: PrinterRuntime(p) for p in config.printers if p.enabled}
         self._printer_locks = {p.host: threading.Lock() for p in config.printers if p.enabled}
         self._jobs: OrderedDict[str, JobInfo] = OrderedDict()
-        self._counters = {"received": 0, "completed": 0, "failed": 0}
+        self._counters = {"received": 0, "completed": 0, "failed": 0, "pages": 0, "pages_known_jobs": 0}
         self._started = False
         self._started_lock = threading.Lock()
 
@@ -259,10 +262,16 @@ class RoundRobinEngine:
                 LOG.warning("Неполное задание %s перемещено для ручной проверки", job_id)
                 return
             os.replace(partial_path, staged_path)
-            info = JobInfo(job_id, staged_path.name, "В очереди", size=size)
+            info = JobInfo(
+                job_id, staged_path.name, "В очереди", size=size,
+                page_count=detect_page_count(staged_path),
+            )
             with self._jobs_lock:
                 self._jobs[job_id] = info
                 self._counters["received"] += 1
+                if info.page_count is not None:
+                    self._counters["pages"] += info.page_count
+                    self._counters["pages_known_jobs"] += 1
                 self._trim_jobs()
             LOG.info("Задание %s принято от %s:%s; %.0f байт", job_id, *address, size)
             self._emit("job", job=info.as_dict())
@@ -481,9 +490,15 @@ class RoundRobinEngine:
                 size = path.stat().st_size
             except OSError:
                 size = 0
-            job = JobInfo(path.stem, path.name, "В очереди после перезапуска", size=size)
+            job = JobInfo(
+                path.stem, path.name, "В очереди после перезапуска", size=size,
+                page_count=detect_page_count(path),
+            )
             with self._jobs_lock:
                 self._jobs[job.job_id] = job
+                if job.page_count is not None:
+                    self._counters["pages"] += job.page_count
+                    self._counters["pages_known_jobs"] += 1
             self._workers_queue.put((path, job.job_id))
             LOG.warning("Восстановлено ожидающее задание %s", path.name)
         # A .sending document may already have reached the printer. Do not replay it.
@@ -628,23 +643,30 @@ class RoundRobinEngine:
         self._emit("printers", printers=rows)
 
     def _trim_jobs(self) -> None:
+        active_statuses = {"В очереди", "В очереди после перезапуска", "Печатается"}
         while len(self._jobs) > 200:
-            key, job = next(iter(self._jobs.items()))
-            if job.status in ("В очереди", "В очереди после перезапуска", "Печатается"):
+            # Не даём старому активному заданию блокировать очистку завершённых.
+            removable = next(
+                (key for key, job in self._jobs.items() if job.status not in active_statuses),
+                None,
+            )
+            if removable is None:
                 break
-            self._jobs.pop(key, None)
+            self._jobs.pop(removable, None)
 
     def snapshot(self) -> dict:
         with self._jobs_lock:
-            # Сначала показываем активные задания, затем самые новые завершённые.
+            all_jobs = list(self._jobs.values())
             active_statuses = {"В очереди", "В очереди после перезапуска", "Печатается"}
+            queued = sum(1 for job in all_jobs if job.status.startswith("В очереди"))
+            active = sum(1 for job in all_jobs if job.status == "Печатается")
+            # Сначала показываем активные задания, затем самые новые завершённые.
             ordered_jobs = sorted(
-                self._jobs.values(),
+                all_jobs,
                 key=lambda job: (job.status in active_statuses, job.received_at),
                 reverse=True,
             )[:100]
-            # GUI добавляет строки в начало; отдаём их в обратном порядке,
-            # чтобы после заполнения таблицы сверху оказались активные/новые.
+            # GUI добавляет строки в начало; отдаём их в обратном порядке.
             jobs = [job.as_dict() for job in reversed(ordered_jobs)]
             counters = dict(self._counters)
         return {
@@ -652,8 +674,9 @@ class RoundRobinEngine:
             "received": counters["received"],
             "completed": counters["completed"],
             "failed": counters["failed"],
-            "queued": sum(1 for job in jobs if job["status"].startswith("В очереди")),
-            "active": sum(1 for job in jobs if job["status"] == "Печатается"),
+            "pages": counters["pages"] if counters["pages_known_jobs"] else None,
+            "queued": queued,
+            "active": active,
             "jobs": jobs,
             "printers": [
                 {

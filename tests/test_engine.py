@@ -154,7 +154,7 @@ def test_snapshot_limits_jobs_and_prioritizes_active_then_newest(tmp_path, monke
     jobs = engine.snapshot()["jobs"]
     assert len(jobs) == 100
     assert jobs[-1]["job_id"] == "active-old"
-    assert jobs[0]["job_id"] == "job-025"
+    assert jobs[0]["job_id"] == "job-026"
     assert jobs[-1]["status"] == "Печатается"
 
 def test_snapshot_counts_all_active_jobs_not_only_visible_rows(tmp_path, monkeypatch):

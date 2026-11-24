@@ -1746,6 +1746,9 @@ class PrintRoundRobinApp:
             return
         status = str(job.get("status", ""))
         if status != "Печатается":
+            existing = self.transfer_rows.get(job_id)
+            if existing and existing.get("completed") and status == "Передано":
+                return
             self._remove_transfer_row(job_id)
             return
 
@@ -1788,6 +1791,7 @@ class PrintRoundRobinApp:
         row = self.transfer_rows.get(job_id)
         if row is None:
             return
+        row["completed"] = True
         row["progress"].configure(value=100)
         row["value"].configure(text="Передано • 100%")
         # Короткая фиксация завершения делает быстрые задания заметными,

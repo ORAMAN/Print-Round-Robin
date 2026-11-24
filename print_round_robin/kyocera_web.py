@@ -106,10 +106,11 @@ def _toner_percent(source: str, visible: str) -> int | None:
     return None
 
 
-def _classify_status(visible: str) -> tuple[str, str, list[dict[str, str]]]:
+def _classify_status(visible: str) -> tuple[str, str, list[dict[str, str]], list[dict[str, str]]]:
     text = re.sub(r"\s+", " ", visible).strip()
     lower = text.casefold()
     errors: list[dict[str, str]] = []
+    notices: list[dict[str, str]] = []
     rules = (
         (("paper jam", "jammed", "замят", "застрев"), "Замятие бумаги", "critical"),
         (("cover open", "door open", "крышка открыта", "дверца открыта"), "Открыта крышка", "critical"),
@@ -117,12 +118,13 @@ def _classify_status(visible: str) -> tuple[str, str, list[dict[str, str]]]:
         (("waste toner box full", "waste toner container full", "replace waste toner box", "waste toner box is full", "контейнер отработанного тонера заполнен", "бункер отработанного тонера заполнен"), "Бункер отработанного тонера заполнен — требуется замена", "critical"),
         (("waste toner box near full", "waste toner box almost full", "waste toner box warning", "контейнер отработанного тонера почти заполнен", "скоро заполнится бункер отработанного тонера"), "Бункер отработанного тонера почти заполнен", "warning"),
         (("toner empty", "replace toner", "тонер закончился", "замените тонер"), "Требуется замена тонера", "critical"),
-        (("low toner", "toner low", "мало тонера", "низкий уровень тонера"), "Мало тонера", "warning"),
-        (("low paper", "paper low", "мало бумаги"), "Мало бумаги", "warning"),
+        (("low toner", "toner low", "мало тонера", "низкий уровень тонера"), "Мало тонера", "info"),
+        (("low paper", "paper low", "paper is low", "мало бумаги"), "Мало бумаги", "info"),
     )
     for needles, message, severity in rules:
         if any(needle in lower for needle in needles):
-            errors.append({"text": message, "severity": severity})
+            target = notices if severity == "info" else errors
+            target.append({"text": message, "severity": severity})
 
     status = "unknown"
     status_message = ""
@@ -146,7 +148,7 @@ def _classify_status(visible: str) -> tuple[str, str, list[dict[str, str]]]:
             if excerpt and len(excerpt) <= 100 and not errors:
                 status_message = excerpt
                 break
-    return status, status_message, errors
+    return status, status_message, errors, notices
 
 
 def poll_kyocera_web(host: str, timeout: float = WEB_TIMEOUT) -> dict:
@@ -169,6 +171,7 @@ def poll_kyocera_web(host: str, timeout: float = WEB_TIMEOUT) -> dict:
             "web_url": None,
             "supplies": [],
             "errors": [],
+            "notices": [],
             "state": "unknown",
             "status_message": "",
             "polled_at": time.time(),
@@ -177,7 +180,7 @@ def poll_kyocera_web(host: str, timeout: float = WEB_TIMEOUT) -> dict:
 
     visible = _visible_text(source)
     percent = _toner_percent(source, visible)
-    state, status_message, errors = _classify_status(visible)
+    state, status_message, errors, notices = _classify_status(visible)
     supplies = ([{"name": "Тонер", "kind": "toner", "percent": percent, "source": "Command Center RX"}]
                 if percent is not None else [])
     return {
@@ -187,6 +190,7 @@ def poll_kyocera_web(host: str, timeout: float = WEB_TIMEOUT) -> dict:
         "web_url": url,
         "supplies": supplies,
         "errors": errors,
+        "notices": notices,
         "state": state,
         "status_message": status_message,
         "polled_at": time.time(),

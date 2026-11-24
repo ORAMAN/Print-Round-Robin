@@ -180,31 +180,6 @@ def poll_kyocera_web(host: str, timeout: float = WEB_TIMEOUT) -> dict:
     state, status_message, errors = _classify_status(visible)
     supplies = ([{"name": "Тонер", "kind": "toner", "percent": percent, "source": "Command Center RX"}]
                 if percent is not None else [])
-    lower_visible = visible.casefold()
-    if any(token in lower_visible for token in ("waste toner box", "waste toner container", "контейнер отработанного тонера", "бункер отработанного тонера")):
-        waste_status = "Состояние не сообщается"
-        waste_state = "unknown"
-        if any(token in lower_visible for token in ("waste toner box full", "waste toner container full", "replace waste toner box", "контейнер отработанного тонера заполнен", "бункер отработанного тонера заполнен")):
-            waste_status, waste_state = "Заполнен — требуется замена", "critical"
-        elif any(token in lower_visible for token in ("near full", "almost full", "почти заполнен", "скоро заполнится")):
-            waste_status, waste_state = "Почти заполнен — требуется внимание", "warning"
-        elif any(token in lower_visible for token in ("waste toner box ok", "waste toner box normal", "бункер отработанного тонера: норма")):
-            waste_status, waste_state = "Норма", "ok"
-        supplies.append({
-            "name": "Бункер отработанного тонера",
-            "kind": "waste_toner",
-            "percent": None,
-            "status": waste_state,
-            "status_text": waste_status,
-            "source": "Command Center RX",
-        })
-        if waste_state in ("critical", "warning"):
-            errors.append({
-                "text": f"Бункер отработанного тонера: {waste_status.casefold()}",
-                "severity": waste_state,
-            })
-            state = "error" if waste_state == "critical" else ("error" if state == "error" else "warning")
-            status_message = errors[-1]["text"]
     return {
         "wsd_available": wsd_port is not None,
         "wsd_port": wsd_port,

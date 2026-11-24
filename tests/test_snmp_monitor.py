@@ -138,3 +138,50 @@ def test_poll_printer_remains_available_when_optional_mib_tables_time_out(monkey
     assert result["name"] == "Printer model"
     assert result["supplies"] == []
     assert result["alerts"] == []
+
+
+
+def test_waste_toner_box_is_identified_and_percentage_means_fill_level():
+    from print_round_robin import snmp_monitor
+
+    class FakeClient:
+        def walk(self, oid, max_rows=80):
+            rows = {
+                snmp_monitor.PRT_SUPPLY_TYPE: [snmp_monitor.VarBind(oid + ".1", 0x02, 4)],
+                snmp_monitor.PRT_SUPPLY_DESCRIPTION: [snmp_monitor.VarBind(oid + ".1", 0x04, b"Waste Toner Box")],
+                snmp_monitor.PRT_SUPPLY_CAPACITY: [snmp_monitor.VarBind(oid + ".1", 0x02, 100)],
+                snmp_monitor.PRT_SUPPLY_LEVEL: [snmp_monitor.VarBind(oid + ".1", 0x02, 90)],
+            }
+            return rows.get(oid, [])
+
+    result = snmp_monitor._poll_supply_data(FakeClient())
+    assert result == [{
+        "name": "Бункер отработанного тонера",
+        "kind": "waste_toner",
+        "snmp_type": 4,
+        "level": 90,
+        "capacity": 100,
+        "percent": 90,
+        "status": "warning",
+        "status_text": "Заполнен на 90% — скоро потребуется замена",
+        "percent_semantics": "fill",
+    }]
+
+
+def test_waste_toner_box_unknown_level_is_not_reported_as_empty():
+    from print_round_robin import snmp_monitor
+
+    class FakeClient:
+        def walk(self, oid, max_rows=80):
+            rows = {
+                snmp_monitor.PRT_SUPPLY_TYPE: [snmp_monitor.VarBind(oid + ".1", 0x02, 4)],
+                snmp_monitor.PRT_SUPPLY_DESCRIPTION: [snmp_monitor.VarBind(oid + ".1", 0x04, b"Waste Toner Box")],
+                snmp_monitor.PRT_SUPPLY_CAPACITY: [snmp_monitor.VarBind(oid + ".1", 0x02, 100)],
+                snmp_monitor.PRT_SUPPLY_LEVEL: [snmp_monitor.VarBind(oid + ".1", 0x02, -1)],
+            }
+            return rows.get(oid, [])
+
+    result = snmp_monitor._poll_supply_data(FakeClient())
+    assert result[0]["percent"] is None
+    assert result[0]["status"] == "unknown"
+    assert result[0]["status_text"] == "Заполнение не сообщается"

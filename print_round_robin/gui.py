@@ -1531,10 +1531,14 @@ class PrintRoundRobinApp:
             if not name:
                 continue
             percent = supply.get("percent")
-            supply_parts.append(
-                f"{name}: {percent}%" if isinstance(percent, (int, float))
-                else name
-            )
+            status_text = str(supply.get("status_text", "")).strip()
+            if status_text:
+                supply_parts.append(f"{name}: {status_text}")
+            elif isinstance(percent, (int, float)):
+                suffix = "заполнение" if supply.get("percent_semantics") == "fill" else ""
+                supply_parts.append(f"{name}: {percent}%{(' — ' + suffix) if suffix else ''}")
+            else:
+                supply_parts.append(name)
         supplies_text = "  •  ".join(supply_parts[:3])
         if len(supply_parts) > 3:
             supplies_text += f"  (+{len(supply_parts) - 3})"

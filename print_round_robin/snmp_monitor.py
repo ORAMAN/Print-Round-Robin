@@ -253,6 +253,7 @@ _VERSION_CACHE_LOCK = threading.Lock()
 PRT_GENERAL_SERIAL_NUMBER = "1.3.6.1.2.1.43.5.1.1.17"
 PRT_CONSOLE_DISPLAY_TEXT = "1.3.6.1.2.1.43.16.5.1.2"
 # Printer-MIB, RFC 3805.
+PRT_SUPPLY_TYPE = "1.3.6.1.2.1.43.11.1.1.5"
 PRT_SUPPLY_DESCRIPTION = "1.3.6.1.2.1.43.11.1.1.6"
 PRT_SUPPLY_CAPACITY = "1.3.6.1.2.1.43.11.1.1.8"
 PRT_SUPPLY_LEVEL = "1.3.6.1.2.1.43.11.1.1.9"
@@ -300,22 +301,68 @@ def _index_from_oid(oid: str, base: str) -> str:
 
 
 def _poll_supply_data(client: SnmpClient) -> list[dict]:
+    """Read Printer-MIB supplies, preserving type and interpreting waste-toner fill."""
+    types = {
+        _index_from_oid(v.oid, PRT_SUPPLY_TYPE): v.value
+        for v in _safe_walk(client, PRT_SUPPLY_TYPE, max_rows=40)
+    }
     descriptions = _safe_walk(client, PRT_SUPPLY_DESCRIPTION, max_rows=40)
-    capacities = { _index_from_oid(v.oid, PRT_SUPPLY_CAPACITY): v.value
-                   for v in _safe_walk(client, PRT_SUPPLY_CAPACITY, max_rows=40) }
-    levels = { _index_from_oid(v.oid, PRT_SUPPLY_LEVEL): v.value
-               for v in _safe_walk(client, PRT_SUPPLY_LEVEL, max_rows=40) }
+    capacities = {
+        _index_from_oid(v.oid, PRT_SUPPLY_CAPACITY): v.value
+        for v in _safe_walk(client, PRT_SUPPLY_CAPACITY, max_rows=40)
+    }
+    levels = {
+        _index_from_oid(v.oid, PRT_SUPPLY_LEVEL): v.value
+        for v in _safe_walk(client, PRT_SUPPLY_LEVEL, max_rows=40)
+    }
     supplies = []
     for item in descriptions:
         suffix = _index_from_oid(item.oid, PRT_SUPPLY_DESCRIPTION)
+        supply_type = types.get(suffix)
         description = _text(item.value)
+        # Printer-MIB prtMarkerSuppliesType: toner(3), wasteToner(4).
+        is_waste_toner = supply_type == 4 or "waste toner" in description.casefold() or "отработанн" in description.casefold()
+        if is_waste_toner:
+            name = "Бункер отработанного тонера"
+            kind = "waste_toner"
+        elif supply_type == 3 or any(word in description.casefold() for word in ("toner", "тонер")):
+            name = "Тонер"
+            kind = "toner"
+        else:
+            name = description
+            kind = "other"
+
         level = levels.get(suffix)
         capacity = capacities.get(suffix)
         percent = None
+        # Negative Printer-MIB values mean unavailable/other/unknown, not 0%.
         if isinstance(level, int) and isinstance(capacity, int) and level >= 0 and capacity > 0:
             percent = max(0, min(100, round(level * 100 / capacity)))
-        if description:
-            supplies.append({"name": description, "level": level, "capacity": capacity, "percent": percent})
+
+        status_text = ""
+        status = "unknown"
+        if kind == "waste_toner":
+            if percent is None:
+                status_text = "Заполнение не сообщается"
+            elif percent >= 95:
+                status, status_text = "critical", f"Заполнен на {percent}% — требуется замена"
+            elif percent >= 80:
+                status, status_text = "warning", f"Заполнен на {percent}% — скоро потребуется замена"
+            else:
+                status, status_text = "ok", f"Заполнен на {percent}% — норма"
+
+        if description or is_waste_toner:
+            supplies.append({
+                "name": name,
+                "kind": kind,
+                "snmp_type": supply_type,
+                "level": level,
+                "capacity": capacity,
+                "percent": percent,
+                "status": status,
+                "status_text": status_text,
+                "percent_semantics": "fill" if is_waste_toner else "remaining",
+            })
     return supplies
 
 
@@ -332,6 +379,16 @@ def _poll_alerts(client: SnmpClient) -> list[dict]:
         severity = severities.get(suffix)
         # RFC 3805: critical(3), warning(4), warningBinaryChangeEvent(5), other(1).
         level = "critical" if severity == 3 else "warning" if severity in (4, 5) else "info"
+        if any(token in description.casefold() for token in (
+            "waste toner box", "waste toner container",
+            "контейнер отработанного тонера", "бункер отработанного тонера",
+        )):
+            if severity == 3:
+                description = "Бункер отработанного тонера заполнен — требуется замена"
+            elif severity in (4, 5):
+                description = "Бункер отработанного тонера требует внимания"
+            else:
+                description = "Бункер отработанного тонера: состояние не определено"
         alerts.append({"text": description, "severity": level})
     return alerts
 

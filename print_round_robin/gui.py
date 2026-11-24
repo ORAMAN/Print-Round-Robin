@@ -638,7 +638,7 @@ class PrintRoundRobinApp:
         detail_label.pack(fill="x")
         notices_label = tk.Label(
             frame, text="", bg=state_palette["bg"],
-            fg=self.theme_manager.status["warning"]["text"],
+            fg=self.theme_manager.palette["accent"],
             font=("Segoe UI", 9), anchor="w", justify="left", wraplength=250,
         )
         notices_label.pack(fill="x", pady=(2, 0))
@@ -1669,9 +1669,7 @@ class PrintRoundRobinApp:
         card["ip"].configure(fg=palette["muted"])
         card["state"].configure(text=title, fg=state_palette["text"])
         card["detail"].configure(text=detail, fg=state_palette["text"])
-        card["notices"].configure(
-            text=notices, fg=self.theme_manager.status["warning"]["text"]
-        )
+        card["notices"].configure(text=notices, fg=palette["accent"])
         card["toner"].configure(text=toner, fg=state_palette["text"])
         card["footer"].configure(text=footer, fg=palette["muted"])
 

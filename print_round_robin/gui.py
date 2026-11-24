@@ -515,6 +515,10 @@ class PrintRoundRobinApp:
         self.printer_grid_rows = 0
         self._rebuild_printer_cards()
 
+        # Отдельная панель показывает фактический ход отправки байтов на RAW TCP.
+        self.transfer_box = ttk.LabelFrame(job_box, text="Текущая передача", padding=(7, 5))
+        self.transfer_rows: dict[str, dict] = {}
+        self._transfer_box_visible = False
         self.job_tree = self._tree(
             job_box,
             ("id", "status", "size", "pages", "printer", "received", "progress"),
@@ -1694,6 +1698,7 @@ class PrintRoundRobinApp:
         if event.get("type") in ("job", "job_progress") and event.get("job"):
             self._upsert_job(event["job"])
         elif event.get("type") == "job_done":
+            self._complete_transfer_visualization(str(event.get("job_id", "")))
             self.logger.info(
                 "Задание %s передано на %s: %s байт, %.2f с",
                 event.get("job_id"), event.get("printer"), event.get("bytes", 0), event.get("elapsed", 0),
@@ -1709,30 +1714,88 @@ class PrintRoundRobinApp:
             return
         size = int(job.get("size", 0))
         sent = int(job.get("bytes_sent", 0))
+        status = job.get("status", "")
         size_label = f"{size / 1024:.1f} КБ" if size < 1024 * 1024 else f"{size / 1048576:.2f} МБ"
         received = time.strftime("%d.%m %H:%M:%S", time.localtime(job.get("received_at", time.time())))
         detail = (
             f"Отправлено {sent / 1024:.1f} КБ из {size_label}"
-            if sent and job.get("status") == "Печатается" else job.get("error", "")
+            if status == "Печатается" else job.get("error", "")
         )
         page_count = job.get("page_count")
         pages_label = str(page_count) if page_count is not None else "—"
         values = (
-            job_id, job.get("status", ""), size_label, pages_label,
+            job_id, status, size_label, pages_label,
             job.get("printer", "") or "—", received, detail,
         )
-        status = job.get("status", "")
         tag = "ok" if status == "Передано" else "busy" if status == "Печатается" or status.startswith("В очереди") else "error"
         if self.job_tree.exists(job_id):
             self.job_tree.item(job_id, values=values, tags=(tag,))
         else:
             # Новые задания показываем сверху, чтобы текущая печать была видна без прокрутки.
             self.job_tree.insert("", 0, iid=job_id, values=values, tags=(tag,))
+        self._update_transfer_visualization(job)
         children = self.job_tree.get_children()
         # Жёсткий лимит строк защищает Tkinter Treeview от разрастания и подвисаний.
         if len(children) > 100:
             for item in children[100:]:
                 self.job_tree.delete(item)
+
+    def _update_transfer_visualization(self, job: dict) -> None:
+        job_id = str(job.get("job_id", ""))
+        if not job_id:
+            return
+        status = str(job.get("status", ""))
+        if status != "Печатается":
+            self._remove_transfer_row(job_id)
+            return
+
+        row = self.transfer_rows.get(job_id)
+        if row is None:
+            if not self._transfer_box_visible:
+                self.transfer_box.pack(fill="x", pady=(0, 6), before=self.job_tree)
+                self._transfer_box_visible = True
+            frame = ttk.Frame(self.transfer_box)
+            frame.pack(fill="x", pady=2)
+            title = ttk.Label(frame, width=38, anchor="w")
+            title.pack(side="left", padx=(0, 8))
+            progress = ttk.Progressbar(frame, mode="determinate", maximum=100, length=260)
+            progress.pack(side="left", fill="x", expand=True, padx=(0, 8))
+            value = ttk.Label(frame, width=34, anchor="e")
+            value.pack(side="right")
+            row = {"frame": frame, "title": title, "progress": progress, "value": value}
+            self.transfer_rows[job_id] = row
+
+        size = max(0, int(job.get("size", 0)))
+        sent = max(0, int(job.get("bytes_sent", 0)))
+        percent = min(100.0, sent * 100.0 / size) if size else 0.0
+        filename = str(job.get("filename") or job_id)
+        printer = str(job.get("printer") or "принтер не выбран")
+        row["title"].configure(text=f"{filename[:34]}  →  {printer}")
+        row["progress"].configure(value=percent)
+        row["value"].configure(
+            text=f"{percent:.1f}%  •  {sent / 1048576:.2f} / {size / 1048576:.2f} МБ"
+        )
+
+    def _remove_transfer_row(self, job_id: str) -> None:
+        row = self.transfer_rows.pop(job_id, None)
+        if row:
+            row["frame"].destroy()
+        if not self.transfer_rows and self._transfer_box_visible:
+            self.transfer_box.pack_forget()
+            self._transfer_box_visible = False
+
+    def _complete_transfer_visualization(self, job_id: str) -> None:
+        row = self.transfer_rows.get(job_id)
+        if row is None:
+            return
+        row["progress"].configure(value=100)
+        row["value"].configure(text="Передано • 100%")
+        # Короткая фиксация завершения делает быстрые задания заметными,
+        # не задерживая фактическое завершение или освобождение принтера.
+        self.root.after(1200, lambda key=job_id, expected=row: (
+            self._remove_transfer_row(key)
+            if self.transfer_rows.get(key) is expected else None
+        ))
 
     def _show_queue_info(self, info: dict | None):
         if not info:

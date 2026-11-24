@@ -1715,10 +1715,12 @@ class PrintRoundRobinApp:
         if self.job_tree.exists(job_id):
             self.job_tree.item(job_id, values=values, tags=(tag,))
         else:
-            self.job_tree.insert("", "end", iid=job_id, values=values, tags=(tag,))
+            # Новые задания показываем сверху, чтобы текущая печать была видна без прокрутки.
+            self.job_tree.insert("", 0, iid=job_id, values=values, tags=(tag,))
         children = self.job_tree.get_children()
+        # Жёсткий лимит строк защищает Tkinter Treeview от разрастания и подвисаний.
         if len(children) > 100:
-            for item in children[:-100]:
+            for item in children[100:]:
                 self.job_tree.delete(item)
 
     def _show_queue_info(self, info: dict | None):

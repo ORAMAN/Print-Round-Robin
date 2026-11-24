@@ -503,11 +503,11 @@ def poll_printer(host: str, community: str = "public", port: int = 161,
         if error and isinstance(error.value, bytes):
             errors = decode_error_bits(error.value)
 
-    # hrDeviceStatus is the warning/status value read by the VBA workbook.
+    # hrDeviceStatus=3 is generic: when the only detail is a consumable
+    # advisory (low toner/paper), it must not turn the whole printer card yellow.
     device_status = device_status_item.value if device_status_item else None
-    if device_status == 3:
-        errors.append({"text": "Устройство сообщает состояние WARNING (hrDeviceStatus=3)", "severity": "warning"})
-    elif device_status == 5:
+    generic_device_warning = device_status == 3
+    if device_status == 5:
         errors.append({"text": "Устройство сообщает состояние DOWN (hrDeviceStatus=5)", "severity": "critical"})
 
     console_message = _text(console_item.value) if console_item and console_item.value is not None else ""
@@ -519,18 +519,37 @@ def poll_printer(host: str, community: str = "public", port: int = 161,
         if alert["text"].casefold() not in seen:
             errors.append(alert)
             seen.add(alert["text"].casefold())
-    supply_warning = []
+    # Low toner/paper are consumable advisories, not printer faults. Keep them
+    # visible separately so real paper-out/jam/cover errors retain priority.
+    advisory_labels = {"мало бумаги": "Мало бумаги", "мало тонера": "Мало тонера"}
+    advisories = []
+    operational_errors = []
+    for item in errors:
+        text = str(item.get("text", "")).strip()
+        normalized = text.casefold()
+        if normalized in advisory_labels or any(token in normalized for token in (
+            "low toner", "toner low", "low paper", "paper low",
+        )):
+            label = advisory_labels.get(normalized) or (
+                "Мало тонера" if "toner" in normalized else "Мало бумаги"
+            )
+            if not any(x["text"] == label for x in advisories):
+                advisories.append({"text": label, "severity": "info"})
+        else:
+            operational_errors.append(item)
+    errors = operational_errors
+
     for supply in supplies:
         name = supply["name"].casefold()
         if supply["percent"] is not None and any(word in name for word in ("toner", "тонер")):
-            if supply["percent"] <= 5:
-                supply_warning.append({"text": f"Тонер почти закончился ({supply['percent']}%)", "severity": "critical"})
-            elif supply["percent"] <= 15:
-                supply_warning.append({"text": f"Мало тонера ({supply['percent']}%)", "severity": "warning"})
-    for item in supply_warning:
-        if item["text"] not in seen:
-            errors.append(item)
-            seen.add(item["text"])
+            if supply["percent"] <= 15:
+                advisory = "Тонер почти закончился" if supply["percent"] <= 5 else "Мало тонера"
+                supply["advisory"] = advisory
+                if not any(x["text"] == advisory for x in advisories):
+                    advisories.append({"text": f"{advisory} ({supply['percent']}%)", "severity": "info"})
+
+    if generic_device_warning and not advisories:
+        errors.append({"text": "Устройство сообщает состояние WARNING (hrDeviceStatus=3)", "severity": "warning"})
 
     critical = any(item["severity"] == "critical" for item in errors)
     warning = any(item["severity"] == "warning" for item in errors)
@@ -567,6 +586,7 @@ def poll_printer(host: str, community: str = "public", port: int = 161,
         "serial_number": serial_number,
         "printer_index": printer_index,
         "errors": errors,
+        "advisories": advisories,
         "alerts": alerts,
         "supplies": supplies,
         "toner_text": ", ".join(toner_values) if toner_values else "Уровень тонера не сообщается",

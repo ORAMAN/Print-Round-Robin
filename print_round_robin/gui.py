@@ -516,9 +516,14 @@ class PrintRoundRobinApp:
         self._rebuild_printer_cards()
 
         # Отдельная панель показывает фактический ход отправки байтов на RAW TCP.
-        self.transfer_box = ttk.LabelFrame(job_box, text="Текущая передача", padding=(7, 5))
+        self.transfer_box = ttk.LabelFrame(job_box, text="Текущая передача", padding=(7, 5), height=88)
+        self.transfer_box.pack(fill="x", pady=(0, 6), before=job_box.winfo_children()[0] if job_box.winfo_children() else None)
+        self.transfer_box.pack_propagate(False)
         self.transfer_rows: dict[str, dict] = {}
-        self._transfer_box_visible = False
+        self.transfer_empty = ttk.Label(self.transfer_box, text="Нет активных передач", style="Muted.TLabel")
+        self.transfer_empty.pack(fill="x", pady=3)
+        self.transfer_overflow = ttk.Label(self.transfer_box, text="", style="Muted.TLabel")
+        self.transfer_overflow.pack(fill="x")
         self.job_tree = self._tree(
             job_box,
             ("id", "status", "size", "pages", "printer", "received", "progress"),
@@ -1754,11 +1759,7 @@ class PrintRoundRobinApp:
 
         row = self.transfer_rows.get(job_id)
         if row is None:
-            if not self._transfer_box_visible:
-                self.transfer_box.pack(fill="x", pady=(0, 6), before=self.job_tree.master)
-                self._transfer_box_visible = True
             frame = ttk.Frame(self.transfer_box)
-            frame.pack(fill="x", pady=2)
             title = ttk.Label(frame, width=38, anchor="w")
             title.pack(side="left", padx=(0, 8))
             progress = ttk.Progressbar(frame, mode="determinate", maximum=100, length=260)
@@ -1767,6 +1768,7 @@ class PrintRoundRobinApp:
             value.pack(side="right")
             row = {"frame": frame, "title": title, "progress": progress, "value": value}
             self.transfer_rows[job_id] = row
+        self._layout_transfer_rows()
 
         size = max(0, int(job.get("size", 0)))
         sent = max(0, int(job.get("bytes_sent", 0)))
@@ -1783,9 +1785,23 @@ class PrintRoundRobinApp:
         row = self.transfer_rows.pop(job_id, None)
         if row:
             row["frame"].destroy()
-        if not self.transfer_rows and self._transfer_box_visible:
-            self.transfer_box.pack_forget()
-            self._transfer_box_visible = False
+        self._layout_transfer_rows()
+
+    def _layout_transfer_rows(self) -> None:
+        # Панель имеет постоянную высоту: изменение числа заданий не сдвигает таблицу.
+        rows = list(self.transfer_rows.values())
+        for index, row in enumerate(rows[:2]):
+            row["frame"].pack(fill="x", pady=1)
+        for row in rows[2:]:
+            row["frame"].pack_forget()
+        if rows:
+            self.transfer_empty.pack_forget()
+        else:
+            self.transfer_empty.pack(fill="x", pady=3)
+        hidden = max(0, len(rows) - 2)
+        self.transfer_overflow.configure(
+            text=f"И ещё передач: {hidden}" if hidden else ""
+        )
 
     def _complete_transfer_visualization(self, job_id: str) -> None:
         row = self.transfer_rows.get(job_id)
@@ -1794,8 +1810,7 @@ class PrintRoundRobinApp:
         row["completed"] = True
         row["progress"].configure(value=100)
         row["value"].configure(text="Передано • 100%")
-        # Короткая фиксация завершения делает быстрые задания заметными,
-        # не задерживая фактическое завершение или освобождение принтера.
+        # Короткая фиксация завершения не меняет геометрию панели или таблицы.
         self.root.after(1200, lambda key=job_id, expected=row: (
             self._remove_transfer_row(key)
             if self.transfer_rows.get(key) is expected else None

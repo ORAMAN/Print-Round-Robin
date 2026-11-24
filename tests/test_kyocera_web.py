@@ -62,7 +62,6 @@ def test_command_center_does_not_show_waste_toner_label_without_status():
     assert state == "ready"
     assert errors == []
     assert notices == []
-    assert notices == []
 
     # A bare component label is not an actionable supply reading.
     from unittest.mock import patch

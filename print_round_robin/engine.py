@@ -18,6 +18,7 @@ from typing import Callable
 
 from .config import AppConfig, PrinterConfig, LEGACY_DIR, runtime_dir, load_legacy_next_index
 from .snmp_monitor import poll_printer
+from .kyocera_web import poll_kyocera_web
 from .pages import detect_page_count
 
 LOG = logging.getLogger("PrintRoundRobin")
@@ -59,6 +60,7 @@ class PrinterRuntime:
     device_status: dict | None = None
     snmp_available: bool | None = None
     snmp_error: str = ""
+    web_status: dict | None = None
 
 
 class RoundRobinEngine:
@@ -82,6 +84,7 @@ class RoundRobinEngine:
         self._accept_thread: threading.Thread | None = None
         self._health_thread: threading.Thread | None = None
         self._snmp_thread: threading.Thread | None = None
+        self._web_thread: threading.Thread | None = None
         self._receiver_slots = threading.BoundedSemaphore(config.max_receivers)
         self._worker_threads: list[threading.Thread] = []
         self._workers_queue: queue.Queue[tuple[Path, str]] = queue.Queue()
@@ -173,6 +176,10 @@ class RoundRobinEngine:
                     target=self._snmp_loop, name="PrintRelay-SNMP", daemon=True
                 )
                 self._snmp_thread.start()
+            self._web_thread = threading.Thread(
+                target=self._web_loop, name="PrintRelay-KyoceraWeb", daemon=True
+            )
+            self._web_thread.start()
             LOG.info(
                 "Ретранслятор запущен: %s:%d; принтеров: %d; рабочих потоков: %d",
                 self.config.listener_host, self.config.listener_port,
@@ -203,7 +210,7 @@ class RoundRobinEngine:
                     client.close()
                 except OSError:
                     pass
-            for thread in [self._accept_thread, self._health_thread, self._snmp_thread, *receivers, *self._worker_threads]:
+            for thread in [self._accept_thread, self._health_thread, self._snmp_thread, self._web_thread, *receivers, *self._worker_threads]:
                 if thread and thread.is_alive():
                     thread.join(timeout=wait_seconds)
             self._started = False
@@ -635,6 +642,42 @@ class RoundRobinEngine:
                 next_poll += self.config.snmp_interval
                 self._stop.wait(max(0.0, next_poll - time.monotonic()))
 
+    def _web_loop(self) -> None:
+        """Poll WSD endpoints and the read-only Command Center RX home page."""
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        hosts = [p for p in self.config.printers if p.enabled]
+        with ThreadPoolExecutor(
+            max_workers=min(10, len(hosts) or 1), thread_name_prefix="KyoceraWeb"
+        ) as pool:
+            next_poll = time.monotonic()
+            while not self._stop.is_set():
+                future_map = {
+                    pool.submit(poll_kyocera_web, printer.host): printer
+                    for printer in hosts
+                }
+                for future in as_completed(future_map):
+                    if self._stop.is_set():
+                        return
+                    printer = future_map[future]
+                    runtime = self._printer_runtime[printer.host]
+                    try:
+                        runtime.web_status = future.result()
+                    except Exception as exc:
+                        LOG.debug("Kyocera web/WSD poll failed for %s: %s", printer.host, exc)
+                        if runtime.web_status:
+                            runtime.web_status = dict(runtime.web_status)
+                            runtime.web_status["stale"] = True
+                        else:
+                            runtime.web_status = {
+                                "wsd_available": None, "web_available": False,
+                                "supplies": [], "errors": [], "state": "unknown",
+                                "status_message": "", "stale": True,
+                            }
+                    self._emit_printer_status()
+                next_poll += 15.0
+                self._stop.wait(max(0.0, next_poll - time.monotonic()))
+
     def _emit_printer_status(self) -> None:
         rows = []
         for host, runtime in self._printer_runtime.items():
@@ -651,6 +694,7 @@ class RoundRobinEngine:
                 "device_status": runtime.device_status,
                 "snmp_available": runtime.snmp_available,
                 "snmp_error": runtime.snmp_error,
+                "web_status": runtime.web_status,
             })
         self._emit("printers", printers=rows)
 

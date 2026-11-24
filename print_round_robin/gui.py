@@ -1751,7 +1751,7 @@ class PrintRoundRobinApp:
                 self._render_printer_card(card, row)
             else:
                 self._paint_printer_card(card, "unknown", "ОЖИДАНИЕ", "Нет свежих данных",
-                                         "Тонер: —", "SNMP: —")
+                                         "", "Тонер: —", "SNMP: —")
         for tree_name in ("job_tree", "printer_config_tree"):
             tree = getattr(self, tree_name, None)
             if tree is not None:

@@ -1557,9 +1557,9 @@ class PrintRoundRobinApp:
         supply_parts = [line for line in (_format_supply_line(item) for item in supplies) if line]
         # Separate supplies into lines: long Kyocera consumable descriptions
         # should wrap inside the card instead of running into its neighbor.
-        supplies_text = "\\n".join(supply_parts[:3])
+        supplies_text = "\n".join(supply_parts[:3])
         if len(supply_parts) > 3:
-            supplies_text += f"\\n(+{len(supply_parts) - 3})"
+            supplies_text += f"\n(+{len(supply_parts) - 3})"
 
         network_text = (
             "RAW: передача" if current_job else

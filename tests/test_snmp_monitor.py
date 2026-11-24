@@ -260,7 +260,7 @@ def test_low_toner_error_bit_is_an_advisory_not_an_operational_fault(monkeypatch
                 f"{snmp_monitor.HR_DEVICE_DESCRIPTION}.1": b"Kyocera ECOSYS PA6000x",
                 f"{snmp_monitor.HR_PRINTER_STATUS}.1": 3,
                 f"{snmp_monitor.HR_DEVICE_STATUS}.1": 3,
-                f"{snmp_monitor.HR_PRINTER_ERRORS}.1": b"\\x20\\x00",
+                f"{snmp_monitor.HR_PRINTER_ERRORS}.1": b"\x20\x00",
                 f"{snmp_monitor.PRT_CONSOLE_DISPLAY_TEXT}.1.1": b"Ready to print",
             }
             if oid not in values:
@@ -290,7 +290,7 @@ def test_paper_jam_remains_critical_when_low_toner_is_also_reported(monkeypatch)
                 f"{snmp_monitor.HR_DEVICE_DESCRIPTION}.1": b"Kyocera ECOSYS PA6000x",
                 f"{snmp_monitor.HR_PRINTER_STATUS}.1": 3,
                 f"{snmp_monitor.HR_DEVICE_STATUS}.1": 3,
-                f"{snmp_monitor.HR_PRINTER_ERRORS}.1": b"\\x24\\x00",
+                f"{snmp_monitor.HR_PRINTER_ERRORS}.1": b"\x24\x00",
                 f"{snmp_monitor.PRT_CONSOLE_DISPLAY_TEXT}.1.1": b"Paper jam",
             }
             if oid not in values:

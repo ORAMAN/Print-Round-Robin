@@ -154,3 +154,44 @@ def test_snapshot_limits_jobs_and_prioritizes_active_then_newest(tmp_path, monke
     assert jobs[-1]["job_id"] == "active-old"
     assert jobs[0]["job_id"] == "job-025"
     assert jobs[-1]["status"] == "Печатается"
+
+def test_snapshot_counts_all_active_jobs_not_only_visible_rows(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    engine = RoundRobinEngine(AppConfig(printers=[]))
+    with engine._jobs_lock:
+        for index in range(120):
+            job = JobInfo(
+                job_id=f"queued-{index:03d}",
+                filename=f"queued-{index:03d}.prn",
+                status="В очереди",
+                received_at=float(index),
+            )
+            engine._jobs[job.job_id] = job
+        engine._jobs["printing"] = JobInfo(
+            job_id="printing",
+            filename="printing.prn",
+            status="Печатается",
+        )
+        for index in range(110):
+            job = JobInfo(
+                job_id=f"done-{index:03d}",
+                filename=f"done-{index:03d}.prn",
+                status="Передано",
+                received_at=float(index),
+            )
+            engine._jobs[job.job_id] = job
+
+    snapshot = engine.snapshot()
+    assert len(snapshot["jobs"]) == 100
+    assert snapshot["queued"] == 120
+    assert snapshot["active"] == 1
+
+
+def test_snapshot_exposes_known_page_total_only_when_available(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    engine = RoundRobinEngine(AppConfig(printers=[]))
+    assert engine.snapshot()["pages"] is None
+    with engine._jobs_lock:
+        engine._counters["pages"] = 8
+        engine._counters["pages_known_jobs"] = 2
+    assert engine.snapshot()["pages"] == 8

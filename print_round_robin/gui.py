@@ -54,6 +54,38 @@ def configure_logging(target: queue.Queue) -> logging.Logger:
     return logger
 
 
+def _partition_printer_messages(
+    errors: list[dict], notices: list[dict] | None = None,
+) -> tuple[list[dict], list[dict]]:
+    """Separate supply notices from messages that affect operational state."""
+    operational: list[dict] = []
+    informational: list[dict] = []
+    seen_operational: set[str] = set()
+    seen_information: set[str] = set()
+    info_phrases = (
+        "мало тонера", "тонер почти закончился", "низкий уровень тонера",
+        "low toner", "toner low", "мало бумаги", "низкий уровень бумаги",
+        "low paper", "paper low",
+    )
+    for item in [*(errors or []), *(notices or [])]:
+        if not isinstance(item, dict):
+            continue
+        message = str(item.get("text") or "").strip()
+        if not message:
+            continue
+        normalized = message.casefold()
+        is_information = (
+            str(item.get("severity", "")).casefold() == "info"
+            or any(phrase in normalized for phrase in info_phrases)
+        )
+        target = informational if is_information else operational
+        seen = seen_information if is_information else seen_operational
+        if normalized not in seen:
+            target.append(item)
+            seen.add(normalized)
+    return operational, informational
+
+
 def _format_supply_line(supply: dict) -> str:
     """Build a compact supply label while keeping the toner cartridge model."""
     name = str(supply.get("name", "")).strip()
@@ -604,6 +636,12 @@ class PrintRoundRobinApp:
             wraplength=250,
         )
         detail_label.pack(fill="x")
+        notices_label = tk.Label(
+            frame, text="", bg=state_palette["bg"],
+            fg=self.theme_manager.status["warning"]["text"],
+            font=("Segoe UI", 9), anchor="w", justify="left", wraplength=250,
+        )
+        notices_label.pack(fill="x", pady=(2, 0))
         toner_label = tk.Label(
             frame, text="Расходные материалы: —", bg=state_palette["bg"],
             fg=state_palette["text"], font=("Segoe UI", 9), anchor="w",
@@ -620,12 +658,12 @@ class PrintRoundRobinApp:
         card = {
             "frame": frame, "header": header, "name": name_label, "dot": dot_label,
             "ip": ip_label, "state": state_label, "detail": detail_label,
-            "toner": toner_label, "footer": footer_label,
+            "notices": notices_label, "toner": toner_label, "footer": footer_label,
             "printer": printer,
         }
         self.printer_cards[printer.host] = card
         for widget in (frame, header, name_label, dot_label, ip_label, state_label,
-                       detail_label, toner_label, footer_label):
+                       detail_label, notices_label, toner_label, footer_label):
             widget.bind("<Double-Button-1>", lambda _event, host=printer.host: self.show_printer_details(host))
         frame.bind(
             "<Configure>",
@@ -1475,7 +1513,7 @@ class PrintRoundRobinApp:
             row = self._latest_printer_rows.get(host)
             if row is None:
                 self._paint_printer_card(card, "unknown", "ОЖИДАНИЕ", "Нет свежих данных",
-                                         "", "Мониторинг ещё не получил ответ")
+                                         "", "", "Мониторинг ещё не получил ответ")
                 continue
             self._render_printer_card(card, row)
 
@@ -1488,13 +1526,12 @@ class PrintRoundRobinApp:
         tcp_down = row.get("status") == "Недоступен"
         snmp_available = row.get("snmp_available")
         device_stale = bool(device.get("stale"))
-        errors = [] if device_stale else list(device.get("errors") or [])
+        error_messages = [] if device_stale else list(device.get("errors") or [])
+        notice_messages = [] if device_stale else list(device.get("notices") or [])
         if not web_stale:
-            known_errors = {str(item.get("text", "")).casefold() for item in errors}
-            errors.extend(
-                item for item in (web.get("errors") or [])
-                if str(item.get("text", "")).casefold() not in known_errors
-            )
+            error_messages.extend(web.get("errors") or [])
+            notice_messages.extend(web.get("notices") or [])
+        errors, notices = _partition_printer_messages(error_messages, notice_messages)
         state = "unknown"
         title = "СОСТОЯНИЕ НЕИЗВЕСТНО"
 
@@ -1550,6 +1587,13 @@ class PrintRoundRobinApp:
         else:
             detail = "Ожидание данных состояния устройства"
 
+        notice_texts = [str(item.get("text", "")).strip() for item in notices if item.get("text")]
+        notices_text = ""
+        if notice_texts:
+            notices_text = "ⓘ  " + "  •  ".join(notice_texts[:2])
+            if len(notice_texts) > 2:
+                notices_text += f"  (+{len(notice_texts) - 2})"
+
         # Показываем только реально обнаруженные расходные материалы.
         # Если модель не публикует их через Printer-MIB, строка остаётся пустой,
         # а не заполняется одинаковым бесполезным сообщением для всех принтеров.
@@ -1593,20 +1637,20 @@ class PrintRoundRobinApp:
         )
         if current_job:
             footer = f"{footer}  •  ID: {current_job[:14]}"
-        self._paint_printer_card(card, state, title, detail, supplies_text, footer)
+        self._paint_printer_card(card, state, title, detail, notices_text, supplies_text, footer)
 
     @staticmethod
     def _resize_printer_card_text(card: dict, width: int) -> None:
         """Keep variable-length status and supply text inside its card."""
         wraplength = max(145, int(width) - 30)
-        for key in ("detail", "toner", "footer"):
+        for key in ("detail", "notices", "toner", "footer"):
             try:
                 card[key].configure(wraplength=wraplength)
             except tk.TclError:
                 pass
 
     def _paint_printer_card(self, card: dict, state: str, title: str,
-                            detail: str, toner: str, footer: str) -> None:
+                            detail: str, notices: str, toner: str, footer: str) -> None:
         state_palette = self.theme_manager.status.get(
             state, self.theme_manager.status["unknown"]
         )
@@ -1617,7 +1661,7 @@ class PrintRoundRobinApp:
             highlightbackground=state_palette["border"],
             highlightcolor=state_palette["border"],
         )
-        for key in ("header", "name", "dot", "ip", "state", "detail", "toner", "footer"):
+        for key in ("header", "name", "dot", "ip", "state", "detail", "notices", "toner", "footer"):
             widget = card[key]
             widget.configure(bg=state_palette["bg"])
         card["name"].configure(fg=state_palette["title"])
@@ -1625,6 +1669,9 @@ class PrintRoundRobinApp:
         card["ip"].configure(fg=palette["muted"])
         card["state"].configure(text=title, fg=state_palette["text"])
         card["detail"].configure(text=detail, fg=state_palette["text"])
+        card["notices"].configure(
+            text=notices, fg=self.theme_manager.status["warning"]["text"]
+        )
         card["toner"].configure(text=toner, fg=state_palette["text"])
         card["footer"].configure(text=footer, fg=palette["muted"])
 
@@ -1724,6 +1771,11 @@ class PrintRoundRobinApp:
         row = getattr(self, "_latest_printer_rows", {}).get(host, {})
         config = next((p for p in self.config.printers if p.host == host), None)
         device = row.get("device_status") or {}
+        web = row.get("web_status") or {}
+        hardware_alerts, notices = _partition_printer_messages(
+            list(device.get("errors") or []) + list(web.get("errors") or []),
+            list(device.get("notices") or []) + list(web.get("notices") or []),
+        )
         lines = [
             f"Принтер: {config.name if config else host}",
             f"Адрес: {host}:{config.port if config else 9100}",
@@ -1745,11 +1797,6 @@ class PrintRoundRobinApp:
             lines.append(f"SNMP-имя: {device.get('name', '—')}")
             lines.append(f"Последний опрос: {time.strftime('%d.%m.%Y %H:%M:%S', time.localtime(device.get('polled_at', time.time())))}")
             lines.append("")
-            lines.append("АППАРАТНЫЕ ПРЕДУПРЕЖДЕНИЯ:")
-            lines.extend(f" • {item.get('text', '')}" for item in device.get("errors", []))
-            if not device.get("errors"):
-                lines.append(" • Нет активных предупреждений")
-            lines.append("")
             lines.append("РАСХОДНЫЕ МАТЕРИАЛЫ:")
             lines.extend(
                 f" • {item.get('name', 'Расходный материал')}: "
@@ -1759,6 +1806,15 @@ class PrintRoundRobinApp:
             )
         elif row.get("snmp_error"):
             lines.extend(["", "Ошибка SNMP:", row["snmp_error"]])
+        if device or web:
+            lines.extend(["", "АППАРАТНЫЕ ПРЕДУПРЕЖДЕНИЯ:"])
+            lines.extend(f" • {item.get('text', '')}" for item in hardware_alerts)
+            if not hardware_alerts:
+                lines.append(" • Нет активных предупреждений")
+            lines.extend(["", "ИНФОРМАЦИОННЫЕ СООБЩЕНИЯ:"])
+            lines.extend(f" • {item.get('text', '')}" for item in notices)
+            if not notices:
+                lines.append(" • Нет информационных сообщений")
         lines.extend(["", f"Передано заданий: {row.get('jobs_sent', 0)}"])
         messagebox.showinfo("Подробное состояние принтера", "\n".join(lines), parent=self.root)
 

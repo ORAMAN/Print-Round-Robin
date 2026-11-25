@@ -229,6 +229,14 @@ def _build_printer_meter_items(supplies: list[dict], trays: list[dict]) -> list[
     return meters
 
 
+def _packed_sibling(card: dict, preferred_key: str, fallback_key: str):
+    """Return a packed sibling suitable for Tkinter's pack(before=...)."""
+    preferred = card.get(preferred_key)
+    if preferred is not None and preferred.winfo_manager() == "pack":
+        return preferred
+    return card[fallback_key]
+
+
 class PrinterDialog(tk.Toplevel):
     def __init__(self, parent, title: str, printer: PrinterConfig | None = None,
                  default_port: int = 9100):
@@ -1544,59 +1552,70 @@ class PrintRoundRobinApp:
         max_events_per_tick = 500
         try:
             while processed < max_events_per_tick:
-                event = self.events.get_nowait()
+                try:
+                    event = self.events.get_nowait()
+                except queue.Empty:
+                    break
+
                 kind = event.get("type")
-                if kind == "engine":
-                    self._set_engine_state(bool(event.get("running")))
-                elif kind == "engine_started":
-                    self.engine_starting = False
-                    self._set_engine_state(True)
-                elif kind == "engine_start_error":
-                    self.engine_starting = False
-                    self.start_button.configure(state="normal")
-                    self._set_engine_state(False)
-                    messagebox.showerror(
-                        "Не удалось запустить ретранслятор",
-                        event.get("message", "Неизвестная ошибка") +
-                        "\n\nПроверьте, не занят ли локальный TCP-порт предыдущим ретранслятором.",
-                        parent=self.root,
-                    )
-                elif kind == "engine_stopped":
-                    self._set_engine_state(False)
-                elif kind == "engine_stop_error":
-                    self.stop_button.configure(state="normal")
-                    messagebox.showerror("Остановка", event.get("message", "Ошибка"), parent=self.root)
-                elif kind == "printers":
-                    self._update_printer_status(event.get("printers", []))
-                elif kind in ("job", "job_progress", "job_done", "job_failed"):
-                    self._update_job_event(event)
-                elif kind == "drivers":
-                    self.driver_names = event.get("names", [])
-                    self.driver_combo["values"] = self.driver_names
-                    if self.config.driver_name in self.driver_names:
-                        self.driver_var.set(self.config.driver_name)
-                    elif self.driver_names and self.driver_var.get() not in self.driver_names:
-                        kyocera = next((n for n in self.driver_names if "kyocera" in n.casefold()), "")
-                        self.driver_var.set(kyocera or self.driver_names[0])
-                    self.windows_status_var.set(f"Установлено драйверов: {len(self.driver_names)}")
-                elif kind == "drivers_error":
-                    self.windows_status_var.set("Не удалось получить драйверы Windows.")
-                    self.logger.error("Список драйверов: %s", event.get("message"))
-                elif kind == "queue_info":
-                    self._show_queue_info(event.get("info"))
-                elif kind == "queue_info_error":
-                    self.queue_info_var.set("Не удалось прочитать сведения об очереди.")
-                    self.windows_status_var.set(event.get("message", ""))
-                elif kind == "queue_inspection":
-                    self._handle_queue_inspection(event.get("result", {}))
-                elif kind == "queue_inspection_error":
-                    self.windows_status_var.set("Проверка очереди Windows не выполнена: " + event.get("message", ""))
-                self.events.task_done()
-                processed += 1
-        except queue.Empty:
-            pass
-        if not self._closing:
-            self.root.after(150, self._poll_events)
+                try:
+                    if kind == "engine":
+                        self._set_engine_state(bool(event.get("running")))
+                    elif kind == "engine_started":
+                        self.engine_starting = False
+                        self._set_engine_state(True)
+                    elif kind == "engine_start_error":
+                        self.engine_starting = False
+                        self.start_button.configure(state="normal")
+                        self._set_engine_state(False)
+                        messagebox.showerror(
+                            "Не удалось запустить ретранслятор",
+                            event.get("message", "Неизвестная ошибка") +
+                            "\n\nПроверьте, не занят ли локальный TCP-порт предыдущего ретранслятора.",
+                            parent=self.root,
+                        )
+                    elif kind == "engine_stopped":
+                        self._set_engine_state(False)
+                    elif kind == "engine_stop_error":
+                        self.stop_button.configure(state="normal")
+                        messagebox.showerror("Остановка", event.get("message", "Ошибка"), parent=self.root)
+                    elif kind == "printers":
+                        self._update_printer_status(event.get("printers", []))
+                    elif kind in ("job", "job_progress", "job_done", "job_failed"):
+                        self._update_job_event(event)
+                    elif kind == "drivers":
+                        self.driver_names = event.get("names", [])
+                        self.driver_combo["values"] = self.driver_names
+                        if self.config.driver_name in self.driver_names:
+                            self.driver_var.set(self.config.driver_name)
+                        elif self.driver_names and self.driver_var.get() not in self.driver_names:
+                            kyocera = next((n for n in self.driver_names if "kyocera" in n.casefold()), "")
+                            self.driver_var.set(kyocera or self.driver_names[0])
+                        self.windows_status_var.set(f"Установлено драйверов: {len(self.driver_names)}")
+                    elif kind == "drivers_error":
+                        self.windows_status_var.set("Не удалось получить драйверы Windows.")
+                        self.logger.error("Список драйверов: %s", event.get("message"))
+                    elif kind == "queue_info":
+                        self._show_queue_info(event.get("info"))
+                    elif kind == "queue_info_error":
+                        self.queue_info_var.set("Не удалось прочитать сведения об очереди.")
+                        self.windows_status_var.set(event.get("message", ""))
+                    elif kind == "queue_inspection":
+                        self._handle_queue_inspection(event.get("result", {}))
+                    elif kind == "queue_inspection_error":
+                        self.windows_status_var.set("Проверка очереди Windows не выполнена: " + event.get("message", ""))
+                except Exception:
+                    # A broken card or unrelated UI action must not terminate
+                    # the queue pump; subsequent printer updates still need
+                    # to reach Tk's main thread.
+                    self.logger.exception("Ошибка обработки события интерфейса: %s", kind)
+                finally:
+                    self.events.task_done()
+                    processed += 1
+        finally:
+            # Always schedule the next tick, including after unexpected UI errors.
+            if not self._closing:
+                self.root.after(150, self._poll_events)
 
     def _set_engine_state(self, running: bool):
         self.engine_starting = False
@@ -1631,14 +1650,28 @@ class PrintRoundRobinApp:
     def _update_printer_status(self, printers: list[dict]):
         self._latest_printer_rows = {row.get("host", ""): row for row in printers if row.get("host")}
         for host, card in self.printer_cards.items():
-            row = self._latest_printer_rows.get(host)
-            if row is None:
-                self._paint_printer_card(card, "unknown", "ОЖИДАНИЕ", "Нет свежих данных",
-                                         "", "", "Мониторинг ещё не получил ответ")
-                self._update_printer_meters(card, [], self.theme_manager.status["unknown"]["bg"],
-                                            self.theme_manager.status["unknown"]["text"])
-                continue
-            self._render_printer_card(card, row)
+            try:
+                row = self._latest_printer_rows.get(host)
+                if row is None:
+                    self._paint_printer_card(card, "unknown", "ОЖИДАНИЕ", "Нет свежих данных",
+                                             "", "", "Мониторинг ещё не получил ответ")
+                    self._update_printer_meters(
+                        card, [], self.theme_manager.status["unknown"]["bg"],
+                        self.theme_manager.status["unknown"]["text"],
+                    )
+                    continue
+                self._render_printer_card(card, row)
+            except Exception:
+                # One malformed row must not keep the remaining printer cards gray.
+                self.logger.exception("Не удалось обновить карточку принтера %s", host)
+                try:
+                    self._paint_printer_card(
+                        card, "warning", "ОШИБКА ОБНОВЛЕНИЯ",
+                        "Данные получены, но карточку не удалось отобразить. Подробности в журнале.",
+                        "", "", f"Адрес: {host}",
+                    )
+                except Exception:
+                    self.logger.exception("Не удалось показать резервное состояние карточки %s", host)
 
     def _render_printer_card(self, card: dict, row: dict) -> None:
         device = row.get("device_status") or {}
@@ -1843,7 +1876,8 @@ class PrintRoundRobinApp:
             parent.pack_forget()
             return
         parent.configure(bg=background)
-        parent.pack(fill="x", pady=(2, 0))
+        # A hidden meter frame is reinserted explicitly before the always-packed footer.
+        parent.pack(fill="x", pady=(2, 0), before=card["footer"])
         while len(rows) < len(items):
             rows.append(self._create_printer_meter_row(parent))
         while len(rows) > len(items):
@@ -1889,7 +1923,8 @@ class PrintRoundRobinApp:
         card["toner"].configure(text=toner, fg=state_palette["text"])
         if toner:
             if not card["toner"].winfo_manager():
-                card["toner"].pack(fill="x", pady=(3, 0), before=card["meter_frame"])
+                before = _packed_sibling(card, "meter_frame", "footer")
+                card["toner"].pack(fill="x", pady=(3, 0), before=before)
         else:
             card["toner"].pack_forget()
         card["footer"].configure(text=footer, fg=palette["muted"])

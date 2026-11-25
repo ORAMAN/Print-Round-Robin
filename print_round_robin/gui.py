@@ -119,23 +119,27 @@ def _supply_display_name(supply: dict) -> str:
 
 
 def _format_tray_line(tray: dict) -> str:
-    """Format only a real, usable tray-load reading; omit Printer-MIB sentinels."""
+    """Format a valid tray reading without treating Printer-MIB sentinels as zero."""
     name = str(tray.get("name") or "").strip()
     if not name:
         index = tray.get("input_index")
         name = f"Лоток {index}" if index is not None else "Лоток"
 
     capacity_unit = tray.get("capacity_unit")
+    current = tray.get("current")
+    maximum = tray.get("max_capacity")
     percent = _normalized_percent(tray.get("percent"))
-    if capacity_unit == 19:
+
+    if capacity_unit == 8 and current == -3:
+        # RFC 3805: -3 means at least one unit remains; the exact level is unknown.
+        line = f"{name}: не менее 1 листа"
+    elif capacity_unit == 19:
         if percent is None:
-            percent = _normalized_percent(tray.get("current"))
+            percent = _normalized_percent(current)
         if percent is None:
             return ""
         line = f"{name}: {percent}%"
     else:
-        current = tray.get("current")
-        maximum = tray.get("max_capacity")
         if (not isinstance(current, int) or isinstance(current, bool) or current < 0
                 or not isinstance(maximum, int) or isinstance(maximum, bool) or maximum <= 0):
             return ""
@@ -146,10 +150,6 @@ def _format_tray_line(tray: dict) -> str:
         if unit:
             line += f" {unit}"
         line += f" ({percent}%)"
-
-    elif tray.get("capacity_unit") == 8 and tray.get("current") == -3:
-        # RFC 3805: -3 means at least one unit remains, not an unknown/empty tray.
-        line = f"{name}: не менее 1 листа"
 
     media_name = str(tray.get("media_name") or "").strip()
     if media_name:

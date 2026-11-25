@@ -86,6 +86,43 @@ def _partition_printer_messages(
     return operational, informational
 
 
+def _format_tray_line(tray: dict) -> str:
+    """Format input tray load without treating Printer-MIB sentinel values as counts."""
+    name = str(tray.get("name") or "").strip()
+    if not name:
+        index = tray.get("input_index")
+        name = f"Лоток {index}" if index is not None else "Лоток"
+
+    def format_value(value, *, current: bool) -> str:
+        if not isinstance(value, int):
+            return "не сообщается"
+        if value >= 0:
+            return str(value)
+        if value == -1:
+            return "—"
+        if value == -2:
+            return "неизвестно"
+        if value == -3 and current:
+            return "не менее 1"
+        return "—"
+
+    current = format_value(tray.get("current"), current=True)
+    maximum = format_value(tray.get("max_capacity"), current=False)
+    unit = str(tray.get("unit") or "ед.").strip()
+    line = f"{name}: {current}/{maximum}"
+    if unit:
+        line += f" {unit}"
+
+    percent = tray.get("percent")
+    if isinstance(percent, (int, float)) and tray.get("capacity_unit") != 19:
+        line += f" ({int(percent)}%)"
+
+    media_name = str(tray.get("media_name") or "").strip()
+    if media_name:
+        line += f" • {media_name}"
+    return line
+
+
 def _format_supply_line(supply: dict) -> str:
     """Build a compact supply label while keeping the toner cartridge model."""
     name = str(supply.get("name", "")).strip()
@@ -643,7 +680,7 @@ class PrintRoundRobinApp:
         )
         notices_label.pack(fill="x", pady=(2, 0))
         toner_label = tk.Label(
-            frame, text="Расходные материалы: —", bg=state_palette["bg"],
+            frame, text="Расходные материалы / загрузка лотков: —", bg=state_palette["bg"],
             fg=state_palette["text"], font=("Segoe UI", 9), anchor="w",
             justify="left", wraplength=250,
         )
@@ -1598,6 +1635,7 @@ class PrintRoundRobinApp:
         # Если модель не публикует их через Printer-MIB, строка остаётся пустой,
         # а не заполняется одинаковым бесполезным сообщением для всех принтеров.
         supplies = [] if device_stale else (device.get("supplies") or [])
+        trays = [] if device_stale else (device.get("trays") or [])
         if not supplies and not web_stale:
             supplies = web.get("supplies") or []
         # Do not display the waste-toner box as a consumable: this model does
@@ -1606,9 +1644,17 @@ class PrintRoundRobinApp:
         supply_parts = [line for line in (_format_supply_line(item) for item in supplies) if line]
         # Separate supplies into lines: long Kyocera consumable descriptions
         # should wrap inside the card instead of running into its neighbor.
-        supplies_text = "\n".join(supply_parts[:3])
+        display_parts = supply_parts[:3]
         if len(supply_parts) > 3:
-            supplies_text += f"\n(+{len(supply_parts) - 3})"
+            display_parts.append(f"(ещё расходных материалов: {len(supply_parts) - 3})")
+
+        tray_parts = [line for line in (_format_tray_line(item) for item in trays) if line]
+        if tray_parts:
+            display_parts.append("Загрузка лотков:")
+            display_parts.extend(tray_parts[:4])
+            if len(tray_parts) > 4:
+                display_parts.append(f"(ещё лотков: {len(tray_parts) - 4})")
+        supplies_text = "\n".join(display_parts)
 
         network_text = (
             "RAW: передача" if current_job else
@@ -1802,6 +1848,14 @@ class PrintRoundRobinApp:
                 else f" • {item.get('name', 'Расходный материал')}: уровень не сообщается"
                 for item in device.get("supplies", [])
             )
+            lines.append("")
+            lines.append("ЗАГРУЗКА ЛОТКОВ:")
+            tray_lines = [
+                _format_tray_line(item) for item in device.get("trays", [])
+            ]
+            lines.extend(f" • {line}" for line in tray_lines)
+            if not tray_lines:
+                lines.append(" • Данные о загрузке лотков не сообщаются")
         elif row.get("snmp_error"):
             lines.extend(["", "Ошибка SNMP:", row["snmp_error"]])
         if device or web:

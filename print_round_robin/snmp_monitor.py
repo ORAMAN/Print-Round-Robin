@@ -261,6 +261,7 @@ PRT_SUPPLY_LEVEL = "1.3.6.1.2.1.43.11.1.1.9"
 PRT_INPUT_CAPACITY_UNIT = "1.3.6.1.2.1.43.8.2.1.8"
 PRT_INPUT_MAX_CAPACITY = "1.3.6.1.2.1.43.8.2.1.9"
 PRT_INPUT_CURRENT_LEVEL = "1.3.6.1.2.1.43.8.2.1.10"
+PRT_INPUT_STATUS = "1.3.6.1.2.1.43.8.2.1.11"
 PRT_INPUT_MEDIA_NAME = "1.3.6.1.2.1.43.8.2.1.12"
 PRT_INPUT_NAME = "1.3.6.1.2.1.43.8.2.1.13"
 PRT_ALERT_SEVERITY = "1.3.6.1.2.1.43.18.1.1.2"
@@ -387,6 +388,7 @@ def _poll_input_trays(client: SnmpClient) -> list[dict]:
         "unit": PRT_INPUT_CAPACITY_UNIT,
         "max_capacity": PRT_INPUT_MAX_CAPACITY,
         "current": PRT_INPUT_CURRENT_LEVEL,
+        "status": PRT_INPUT_STATUS,
         "media_name": PRT_INPUT_MEDIA_NAME,
         "name": PRT_INPUT_NAME,
     }
@@ -406,7 +408,15 @@ def _poll_input_trays(client: SnmpClient) -> list[dict]:
         device_index, input_index = (int(part) for part in indexes)
         current = values["current"].get(suffix)
         maximum = values["max_capacity"].get(suffix)
+        status = values["status"].get(suffix)
         if not isinstance(current, int) and not isinstance(maximum, int):
+            continue
+
+        # RFC 3805 PrtSubUnitStatusTC: availability is encoded in the low
+        # three bits. 1 = unavailable/onRequest, 3 = unavailable/broken.
+        # Do not report an empty paper level for a folded/closed MP tray.
+        availability = status & 0x07 if isinstance(status, int) and status >= 0 else None
+        if availability in (1, 3):
             continue
 
         capacity_unit = values["unit"].get(suffix)
@@ -431,6 +441,8 @@ def _poll_input_trays(client: SnmpClient) -> list[dict]:
             "media_name": media_name,
             "current": current,
             "max_capacity": maximum,
+            "status": status,
+            "availability": availability,
             "capacity_unit": capacity_unit,
             "unit": unit_text,
             "percent": percent,

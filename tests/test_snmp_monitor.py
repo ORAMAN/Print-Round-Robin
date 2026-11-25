@@ -394,6 +394,8 @@ def test_input_tray_table_joins_current_and_maximum_by_both_indexes():
         "media_name": "",
         "current": -3,
         "max_capacity": 300,
+        "status": None,
+        "availability": None,
         "capacity_unit": 8,
         "unit": "листов",
         "percent": None,

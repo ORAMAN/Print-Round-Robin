@@ -147,6 +147,10 @@ def _format_tray_line(tray: dict) -> str:
             line += f" {unit}"
         line += f" ({percent}%)"
 
+    elif tray.get("capacity_unit") == 8 and tray.get("current") == -3:
+        # RFC 3805: -3 means at least one unit remains, not an unknown/empty tray.
+        line = f"{name}: не менее 1 листа"
+
     media_name = str(tray.get("media_name") or "").strip()
     if media_name:
         line += f" • {media_name}"
@@ -201,6 +205,10 @@ def _build_printer_meter_items(supplies: list[dict], trays: list[dict]) -> list[
             if percent is None:
                 continue
             value = f"{percent}%"
+        elif capacity_unit == 8 and current == -3:
+            # Printer-MIB sentinel: at least one sheet remains; exact level unknown.
+            value = "≥1 лист"
+            percent = None
         else:
             if (not isinstance(current, int) or isinstance(current, bool) or current < 0
                     or not isinstance(maximum, int) or isinstance(maximum, bool) or maximum <= 0):
@@ -1911,8 +1919,9 @@ class PrintRoundRobinApp:
             rows.pop()["frame"].destroy()
 
         for meter, item in zip(rows, items):
-            color = _level_color(item["percent"])
-            meter["percent"] = item["percent"]
+            percent = _normalized_percent(item.get("percent"))
+            color = _level_color(percent) if percent is not None else foreground
+            meter["percent"] = percent if percent is not None else 0
             meter["color"] = color
             meter["frame"].configure(bg=background)
             meter["header"].configure(bg=background)
@@ -1923,8 +1932,14 @@ class PrintRoundRobinApp:
                 text=item["value"], bg=background, fg=color,
             )
             meter["bar"].configure(bg=background)
+            if percent is None:
+                # Keep a factual text-only reading; do not draw a fake 0% bar.
+                meter["bar"].pack_forget()
+            else:
+                meter["bar"].pack(fill="x", pady=(1, 0))
             meter["frame"].pack(fill="x", pady=(0, 2))
-            self._draw_printer_meter(meter)
+            if percent is not None:
+                self._draw_printer_meter(meter)
 
     def _paint_printer_card(self, card: dict, state: str, title: str,
                             detail: str, notices: str, toner: str, footer: str) -> None:

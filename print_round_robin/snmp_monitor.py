@@ -450,8 +450,6 @@ def _poll_input_trays(client: SnmpClient) -> list[dict]:
             "device_index": device_index,
             "input_index": input_index,
             "name": name,
-            "model": model,
-            "description": description,
             "media_name": media_name,
             "current": current,
             "max_capacity": maximum,

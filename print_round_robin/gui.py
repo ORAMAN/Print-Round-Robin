@@ -140,7 +140,7 @@ def _format_tray_line(tray: dict) -> str:
                 or not isinstance(maximum, int) or isinstance(maximum, bool) or maximum <= 0):
             return ""
         if percent is None:
-            percent = int(round(current * 100 / maximum))
+            percent = max(0, min(100, int(round(current * 100 / maximum))))
         unit = str(tray.get("unit") or "ед.").strip()
         line = f"{name}: {current}/{maximum}"
         if unit:
@@ -206,7 +206,7 @@ def _build_printer_meter_items(supplies: list[dict], trays: list[dict]) -> list[
                     or not isinstance(maximum, int) or isinstance(maximum, bool) or maximum <= 0):
                 continue
             if percent is None:
-                percent = int(round(current * 100 / maximum))
+                percent = max(0, min(100, int(round(current * 100 / maximum))))
             unit = str(tray.get("unit") or "ед.").strip()
             value = f"{current}/{maximum}"
             if unit:
@@ -1973,7 +1973,7 @@ class PrintRoundRobinApp:
             else:
                 self._paint_printer_card(card, "unknown", "ОЖИДАНИЕ", "Нет свежих данных",
                                          "", "", "SNMP: —")
-                if "meter_frame" in card:
+                if isinstance(card, dict) and "meter_frame" in card:
                     self._update_printer_meters(
                         card, [], self.theme_manager.status["unknown"]["bg"],
                         self.theme_manager.status["unknown"]["text"],

@@ -86,36 +86,66 @@ def _partition_printer_messages(
     return operational, informational
 
 
+def _normalized_percent(value) -> int | None:
+    """Return a sane percentage, rejecting missing and out-of-range readings."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if not 0 <= value <= 100:
+        return None
+    return int(round(value))
+
+
+def _level_color(percent: int | float) -> str:
+    """Semantic color scale for remaining toner and paper."""
+    if percent >= 50:
+        return "#26965b"
+    if percent >= 20:
+        return "#c79a20"
+    if percent >= 10:
+        return "#df792b"
+    return "#d64c4c"
+
+
+def _supply_display_name(supply: dict) -> str:
+    """Return the supply name and preserve the cartridge model where available."""
+    name = str(supply.get("name", "")).strip()
+    kind = str(supply.get("kind", "")).casefold()
+    model = str(supply.get("model") or supply.get("description") or "").strip()
+    is_toner = kind == "toner" or "тонер" in name.casefold() or "toner" in name.casefold()
+    if is_toner and model and model.casefold() not in {"toner", "тонер"}:
+        if model.casefold() != name.casefold():
+            name = f"{name} ({model})"
+    return name
+
+
 def _format_tray_line(tray: dict) -> str:
-    """Format input tray load without treating Printer-MIB sentinel values as counts."""
+    """Format only a real, usable tray-load reading; omit Printer-MIB sentinels."""
     name = str(tray.get("name") or "").strip()
     if not name:
         index = tray.get("input_index")
         name = f"Лоток {index}" if index is not None else "Лоток"
 
-    def format_value(value, *, current: bool) -> str:
-        if not isinstance(value, int):
-            return "не сообщается"
-        if value >= 0:
-            return str(value)
-        if value == -1:
-            return "—"
-        if value == -2:
-            return "неизвестно"
-        if value == -3 and current:
-            return "не менее 1"
-        return "—"
-
-    current = format_value(tray.get("current"), current=True)
-    maximum = format_value(tray.get("max_capacity"), current=False)
-    unit = str(tray.get("unit") or "ед.").strip()
-    line = f"{name}: {current}/{maximum}"
-    if unit:
-        line += f" {unit}"
-
-    percent = tray.get("percent")
-    if isinstance(percent, (int, float)) and tray.get("capacity_unit") != 19:
-        line += f" ({int(percent)}%)"
+    capacity_unit = tray.get("capacity_unit")
+    percent = _normalized_percent(tray.get("percent"))
+    if capacity_unit == 19:
+        if percent is None:
+            percent = _normalized_percent(tray.get("current"))
+        if percent is None:
+            return ""
+        line = f"{name}: {percent}%"
+    else:
+        current = tray.get("current")
+        maximum = tray.get("max_capacity")
+        if (not isinstance(current, int) or isinstance(current, bool) or current < 0
+                or not isinstance(maximum, int) or isinstance(maximum, bool) or maximum <= 0):
+            return ""
+        if percent is None:
+            percent = max(0, min(100, int(round(current * 100 / maximum))))
+        unit = str(tray.get("unit") or "ед.").strip()
+        line = f"{name}: {current}/{maximum}"
+        if unit:
+            line += f" {unit}"
+        line += f" ({percent}%)"
 
     media_name = str(tray.get("media_name") or "").strip()
     if media_name:
@@ -125,27 +155,78 @@ def _format_tray_line(tray: dict) -> str:
 
 def _format_supply_line(supply: dict) -> str:
     """Build a compact supply label while keeping the toner cartridge model."""
-    name = str(supply.get("name", "")).strip()
-    if not name:
+    name = _supply_display_name(supply)
+    if not name or str(supply.get("kind", "")).casefold() == "waste_toner":
         return ""
-
-    kind = str(supply.get("kind", "")).casefold()
-    if kind == "waste_toner":
-        return ""
-    model = str(supply.get("model") or supply.get("description") or "").strip()
-    if kind == "toner" and model and model.casefold() not in {"toner", "тонер"}:
-        if model.casefold() != name.casefold():
-            name = f"{name} ({model})"
 
     status_text = str(supply.get("status_text", "")).strip()
     if status_text:
         return f"{name}: {status_text}"
 
-    percent = supply.get("percent")
-    if isinstance(percent, (int, float)):
+    percent = _normalized_percent(supply.get("percent"))
+    if percent is not None:
         suffix = "заполнение" if supply.get("percent_semantics") == "fill" else ""
         return f"{name}: {percent}%{(' — ' + suffix) if suffix else ''}"
     return name
+
+
+def _build_printer_meter_items(supplies: list[dict], trays: list[dict]) -> list[dict]:
+    """Create colored-bar data only from numeric, meaningful Printer-MIB readings."""
+    meters = []
+    for supply in supplies or []:
+        if str(supply.get("kind", "")).casefold() == "waste_toner":
+            continue
+        name = _supply_display_name(supply)
+        is_toner = (
+            str(supply.get("kind", "")).casefold() == "toner"
+            or "тонер" in name.casefold() or "toner" in name.casefold()
+        )
+        percent = _normalized_percent(supply.get("percent"))
+        if is_toner and name and percent is not None:
+            meters.append({
+                "label": name,
+                "value": f"{percent}%",
+                "percent": percent,
+                "kind": "toner",
+            })
+
+    for tray in trays or []:
+        capacity_unit = tray.get("capacity_unit")
+        percent = _normalized_percent(tray.get("percent"))
+        current = tray.get("current")
+        maximum = tray.get("max_capacity")
+        if capacity_unit == 19:
+            if percent is None:
+                percent = _normalized_percent(current)
+            if percent is None:
+                continue
+            value = f"{percent}%"
+        else:
+            if (not isinstance(current, int) or isinstance(current, bool) or current < 0
+                    or not isinstance(maximum, int) or isinstance(maximum, bool) or maximum <= 0):
+                continue
+            if percent is None:
+                percent = max(0, min(100, int(round(current * 100 / maximum))))
+            unit = str(tray.get("unit") or "ед.").strip()
+            value = f"{current}/{maximum}"
+            if unit:
+                value += f" {unit}"
+            value += f" · {percent}%"
+
+        name = str(tray.get("name") or "").strip()
+        if not name:
+            index = tray.get("input_index")
+            name = f"Лоток {index}" if index is not None else "Лоток"
+        media_name = str(tray.get("media_name") or "").strip()
+        if media_name:
+            name += f" · {media_name}"
+        meters.append({
+            "label": name,
+            "value": value,
+            "percent": percent,
+            "kind": "tray",
+        })
+    return meters
 
 
 class PrinterDialog(tk.Toplevel):
@@ -680,11 +761,13 @@ class PrintRoundRobinApp:
         )
         notices_label.pack(fill="x", pady=(2, 0))
         toner_label = tk.Label(
-            frame, text="Расходные материалы / загрузка лотков: —", bg=state_palette["bg"],
+            frame, text="", bg=state_palette["bg"],
             fg=state_palette["text"], font=("Segoe UI", 9), anchor="w",
             justify="left", wraplength=250,
         )
         toner_label.pack(fill="x", pady=(3, 0))
+        meter_frame = tk.Frame(frame, bg=state_palette["bg"])
+        meter_frame.pack(fill="x", pady=(2, 0))
         footer_label = tk.Label(
             frame, text="Сеть: проверка  •  SNMP: —  •  Заданий: 0",
             bg=state_palette["bg"], fg=palette["muted"],
@@ -695,12 +778,13 @@ class PrintRoundRobinApp:
         card = {
             "frame": frame, "header": header, "name": name_label, "dot": dot_label,
             "ip": ip_label, "state": state_label, "detail": detail_label,
-            "notices": notices_label, "toner": toner_label, "footer": footer_label,
+            "notices": notices_label, "toner": toner_label,
+            "meter_frame": meter_frame, "meter_rows": [], "footer": footer_label,
             "printer": printer,
         }
         self.printer_cards[printer.host] = card
         for widget in (frame, header, name_label, dot_label, ip_label, state_label,
-                       detail_label, notices_label, toner_label, footer_label):
+                       detail_label, notices_label, toner_label, meter_frame, footer_label):
             widget.bind("<Double-Button-1>", lambda _event, host=printer.host: self.show_printer_details(host))
         frame.bind(
             "<Configure>",
@@ -1551,6 +1635,8 @@ class PrintRoundRobinApp:
             if row is None:
                 self._paint_printer_card(card, "unknown", "ОЖИДАНИЕ", "Нет свежих данных",
                                          "", "", "Мониторинг ещё не получил ответ")
+                self._update_printer_meters(card, [], self.theme_manager.status["unknown"]["bg"],
+                                            self.theme_manager.status["unknown"]["text"])
                 continue
             self._render_printer_card(card, row)
 
@@ -1638,22 +1724,24 @@ class PrintRoundRobinApp:
         trays = [] if device_stale else (device.get("trays") or [])
         if not supplies and not web_stale:
             supplies = web.get("supplies") or []
-        # Do not display the waste-toner box as a consumable: this model does
-        # not provide a reliable reading for it. Explicit hardware alerts stay visible above.
+        # The waste-toner box is not a reliably measurable consumable on this model.
         supplies = [item for item in supplies if item.get("kind") != "waste_toner"]
-        supply_parts = [line for line in (_format_supply_line(item) for item in supplies) if line]
-        # Separate supplies into lines: long Kyocera consumable descriptions
-        # should wrap inside the card instead of running into its neighbor.
+        meter_items = _build_printer_meter_items(supplies, trays)
+        # Numeric toner levels are shown as colored gauges; keep only other
+        # textual supply information here to avoid duplicating the percentage.
+        supply_parts = [
+            line for item in supplies
+            if not (
+                (str(item.get("kind", "")).casefold() == "toner"
+                 or "тонер" in _supply_display_name(item).casefold()
+                 or "toner" in _supply_display_name(item).casefold())
+                and _normalized_percent(item.get("percent")) is not None
+            )
+            for line in [_format_supply_line(item)] if line
+        ]
         display_parts = supply_parts[:3]
         if len(supply_parts) > 3:
             display_parts.append(f"(ещё расходных материалов: {len(supply_parts) - 3})")
-
-        tray_parts = [line for line in (_format_tray_line(item) for item in trays) if line]
-        if tray_parts:
-            display_parts.append("Загрузка лотков:")
-            display_parts.extend(tray_parts[:4])
-            if len(tray_parts) > 4:
-                display_parts.append(f"(ещё лотков: {len(tray_parts) - 4})")
         supplies_text = "\n".join(display_parts)
 
         network_text = (
@@ -1684,6 +1772,13 @@ class PrintRoundRobinApp:
         if current_job:
             footer = f"{footer}  •  ID: {current_job[:14]}"
         self._paint_printer_card(card, state, title, detail, notices_text, supplies_text, footer)
+        self._update_printer_meters(
+            card, meter_items, self.theme_manager.status.get(
+                state, self.theme_manager.status["unknown"]
+            )["bg"], self.theme_manager.status.get(
+                state, self.theme_manager.status["unknown"]
+            )["text"],
+        )
 
     @staticmethod
     def _resize_printer_card_text(card: dict, width: int) -> None:
@@ -1694,6 +1789,81 @@ class PrintRoundRobinApp:
                 card[key].configure(wraplength=wraplength)
             except tk.TclError:
                 pass
+
+    def _create_printer_meter_row(self, parent: tk.Frame) -> dict:
+        row_frame = tk.Frame(parent, bg=self.theme_manager.palette["panel"])
+        header = tk.Frame(row_frame, bg=self.theme_manager.palette["panel"])
+        header.pack(fill="x")
+        name_label = tk.Label(
+            header, text="", bg=self.theme_manager.palette["panel"],
+            fg=self.theme_manager.palette["text"], font=("Segoe UI", 8), anchor="w",
+        )
+        name_label.pack(side="left", fill="x", expand=True)
+        value_label = tk.Label(
+            header, text="", bg=self.theme_manager.palette["panel"],
+            fg=self.theme_manager.palette["text"], font=("Segoe UI", 8, "bold"), anchor="e",
+        )
+        value_label.pack(side="right")
+        bar = tk.Canvas(
+            row_frame, height=7, bd=0, highlightthickness=0,
+            bg=self.theme_manager.palette["panel"],
+        )
+        bar.pack(fill="x", pady=(1, 0))
+        meter = {
+            "frame": row_frame, "header": header, "name": name_label,
+            "value": value_label, "bar": bar, "percent": 0,
+            "color": _level_color(0),
+        }
+        bar.bind("<Configure>", lambda _event, item=meter: self._draw_printer_meter(item))
+        return meter
+
+    def _draw_printer_meter(self, meter: dict) -> None:
+        canvas = meter["bar"]
+        width = max(1, canvas.winfo_width())
+        height = max(1, canvas.winfo_height())
+        track = self.theme_manager.palette["progress_track"]
+        percent = max(0, min(100, int(meter.get("percent", 0))))
+        canvas.delete("all")
+        canvas.create_rectangle(0, 0, width, height, fill=track, outline=track)
+        fill_width = int(round(width * percent / 100))
+        if fill_width > 0:
+            canvas.create_rectangle(
+                0, 0, fill_width, height,
+                fill=meter["color"], outline=meter["color"],
+            )
+
+    def _update_printer_meters(
+        self, card: dict, items: list[dict], background: str, foreground: str,
+    ) -> None:
+        parent = card.get("meter_frame")
+        if parent is None:
+            return
+        rows = card.setdefault("meter_rows", [])
+        if not items:
+            parent.pack_forget()
+            return
+        parent.configure(bg=background)
+        parent.pack(fill="x", pady=(2, 0))
+        while len(rows) < len(items):
+            rows.append(self._create_printer_meter_row(parent))
+        while len(rows) > len(items):
+            rows.pop()["frame"].destroy()
+
+        for meter, item in zip(rows, items):
+            color = _level_color(item["percent"])
+            meter["percent"] = item["percent"]
+            meter["color"] = color
+            meter["frame"].configure(bg=background)
+            meter["header"].configure(bg=background)
+            meter["name"].configure(
+                text=item["label"], bg=background, fg=foreground,
+            )
+            meter["value"].configure(
+                text=item["value"], bg=background, fg=color,
+            )
+            meter["bar"].configure(bg=background)
+            meter["frame"].pack(fill="x", pady=(0, 2))
+            self._draw_printer_meter(meter)
 
     def _paint_printer_card(self, card: dict, state: str, title: str,
                             detail: str, notices: str, toner: str, footer: str) -> None:
@@ -1707,7 +1877,7 @@ class PrintRoundRobinApp:
             highlightbackground=state_palette["border"],
             highlightcolor=state_palette["border"],
         )
-        for key in ("header", "name", "dot", "ip", "state", "detail", "notices", "toner", "footer"):
+        for key in ("header", "name", "dot", "ip", "state", "detail", "notices", "toner", "meter_frame", "footer"):
             widget = card[key]
             widget.configure(bg=state_palette["bg"])
         card["name"].configure(fg=state_palette["title"])
@@ -1717,6 +1887,11 @@ class PrintRoundRobinApp:
         card["detail"].configure(text=detail, fg=state_palette["text"])
         card["notices"].configure(text=notices, fg=palette["accent"])
         card["toner"].configure(text=toner, fg=state_palette["text"])
+        if toner:
+            if not card["toner"].winfo_manager():
+                card["toner"].pack(fill="x", pady=(3, 0), before=card["meter_frame"])
+        else:
+            card["toner"].pack_forget()
         card["footer"].configure(text=footer, fg=palette["muted"])
 
     def _rebuild_printer_cards(self) -> None:
@@ -1797,7 +1972,12 @@ class PrintRoundRobinApp:
                 self._render_printer_card(card, row)
             else:
                 self._paint_printer_card(card, "unknown", "ОЖИДАНИЕ", "Нет свежих данных",
-                                         "", "Тонер: —", "SNMP: —")
+                                         "", "", "SNMP: —")
+                if isinstance(card, dict) and "meter_frame" in card:
+                    self._update_printer_meters(
+                        card, [], self.theme_manager.status["unknown"]["bg"],
+                        self.theme_manager.status["unknown"]["text"],
+                    )
         for tree_name in ("job_tree", "printer_config_tree"):
             tree = getattr(self, tree_name, None)
             if tree is not None:
@@ -1840,22 +2020,25 @@ class PrintRoundRobinApp:
                 lines.append("ВНИМАНИЕ: это последнее сохранённое состояние; текущий опрос SNMP не отвечает.")
             lines.append(f"SNMP-имя: {device.get('name', '—')}")
             lines.append(f"Последний опрос: {time.strftime('%d.%m.%Y %H:%M:%S', time.localtime(device.get('polled_at', time.time())))}")
-            lines.append("")
-            lines.append("РАСХОДНЫЕ МАТЕРИАЛЫ:")
-            lines.extend(
-                f" • {item.get('name', 'Расходный материал')}: "
-                f"{item.get('percent')}%" if item.get("percent") is not None
-                else f" • {item.get('name', 'Расходный материал')}: уровень не сообщается"
-                for item in device.get("supplies", [])
-            )
-            lines.append("")
-            lines.append("ЗАГРУЗКА ЛОТКОВ:")
-            tray_lines = [
-                _format_tray_line(item) for item in device.get("trays", [])
+            supply_data = [] if device.get("stale") else (device.get("supplies") or [])
+            if not supply_data and not web.get("stale"):
+                supply_data = web.get("supplies") or []
+            supply_lines = [
+                _format_supply_line(item) for item in supply_data
             ]
-            lines.extend(f" • {line}" for line in tray_lines)
-            if not tray_lines:
-                lines.append(" • Данные о загрузке лотков не сообщаются")
+            supply_lines = [line for line in supply_lines if line]
+            if supply_lines:
+                lines.extend(["", "РАСХОДНЫЕ МАТЕРИАЛЫ:"])
+                lines.extend(f" • {line}" for line in supply_lines)
+
+            tray_data = [] if device.get("stale") else (device.get("trays") or [])
+            tray_lines = [
+                _format_tray_line(item) for item in tray_data
+            ]
+            tray_lines = [line for line in tray_lines if line]
+            if tray_lines:
+                lines.extend(["", "ЗАГРУЗКА ЛОТКОВ:"])
+                lines.extend(f" • {line}" for line in tray_lines)
         elif row.get("snmp_error"):
             lines.extend(["", "Ошибка SNMP:", row["snmp_error"]])
         if device or web:

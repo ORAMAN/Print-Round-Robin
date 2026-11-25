@@ -257,6 +257,12 @@ PRT_SUPPLY_TYPE = "1.3.6.1.2.1.43.11.1.1.5"
 PRT_SUPPLY_DESCRIPTION = "1.3.6.1.2.1.43.11.1.1.6"
 PRT_SUPPLY_CAPACITY = "1.3.6.1.2.1.43.11.1.1.8"
 PRT_SUPPLY_LEVEL = "1.3.6.1.2.1.43.11.1.1.9"
+# Printer-MIB input tray table (indexed by hrDeviceIndex.prtInputIndex).
+PRT_INPUT_CAPACITY_UNIT = "1.3.6.1.2.1.43.8.2.1.8"
+PRT_INPUT_MAX_CAPACITY = "1.3.6.1.2.1.43.8.2.1.9"
+PRT_INPUT_CURRENT_LEVEL = "1.3.6.1.2.1.43.8.2.1.10"
+PRT_INPUT_MEDIA_NAME = "1.3.6.1.2.1.43.8.2.1.12"
+PRT_INPUT_NAME = "1.3.6.1.2.1.43.8.2.1.13"
 PRT_ALERT_SEVERITY = "1.3.6.1.2.1.43.18.1.1.2"
 PRT_ALERT_DESCRIPTION = "1.3.6.1.2.1.43.18.1.1.8"
 
@@ -360,6 +366,78 @@ def _poll_supply_data(client: SnmpClient) -> list[dict]:
                 supply["model"] = description
             supplies.append(supply)
     return supplies
+
+
+_INPUT_CAPACITY_UNITS = {
+    1: "ед.",
+    2: "ед.",
+    3: "0,0001 дюйма",
+    4: "мкм",
+    8: "листов",
+    16: "футов",
+    17: "м",
+    18: "шт.",
+    19: "%",
+}
+
+
+def _poll_input_trays(client: SnmpClient) -> list[dict]:
+    """Read input tray names and current/max paper load from Printer-MIB."""
+    columns = {
+        "unit": PRT_INPUT_CAPACITY_UNIT,
+        "max_capacity": PRT_INPUT_MAX_CAPACITY,
+        "current": PRT_INPUT_CURRENT_LEVEL,
+        "media_name": PRT_INPUT_MEDIA_NAME,
+        "name": PRT_INPUT_NAME,
+    }
+    values: dict[str, dict[str, Any]] = {}
+    suffixes: set[str] = set()
+    for field, oid in columns.items():
+        rows = _safe_walk(client, oid, max_rows=80)
+        column = {_index_from_oid(row.oid, oid): row.value for row in rows}
+        values[field] = column
+        suffixes.update(column)
+
+    trays = []
+    for suffix in suffixes:
+        indexes = suffix.split(".")
+        if len(indexes) != 2 or not all(part.isdigit() for part in indexes):
+            continue
+        device_index, input_index = (int(part) for part in indexes)
+        current = values["current"].get(suffix)
+        maximum = values["max_capacity"].get(suffix)
+        if not isinstance(current, int) and not isinstance(maximum, int):
+            continue
+
+        capacity_unit = values["unit"].get(suffix)
+        unit_text = _INPUT_CAPACITY_UNITS.get(capacity_unit, "ед.")
+        name_value = values["name"].get(suffix)
+        media_value = values["media_name"].get(suffix)
+        name = _text(name_value) if name_value is not None else ""
+        media_name = _text(media_value) if media_value is not None else ""
+        if not name:
+            name = f"Лоток {input_index}"
+
+        percent = None
+        if isinstance(current, int) and current >= 0 and isinstance(maximum, int) and maximum > 0:
+            percent = max(0, min(100, round(current * 100 / maximum)))
+        elif capacity_unit == 19 and isinstance(current, int) and 0 <= current <= 100:
+            percent = current
+
+        trays.append({
+            "device_index": device_index,
+            "input_index": input_index,
+            "name": name,
+            "media_name": media_name,
+            "current": current,
+            "max_capacity": maximum,
+            "capacity_unit": capacity_unit,
+            "unit": unit_text,
+            "percent": percent,
+        })
+
+    trays.sort(key=lambda item: (item["device_index"], item["input_index"]))
+    return trays
 
 
 def _poll_alerts(client: SnmpClient) -> list[dict]:
@@ -488,6 +566,7 @@ def poll_printer(host: str, community: str = "public", port: int = 161,
         serial_future = pool.submit(_safe_get, client, f"{PRT_GENERAL_SERIAL_NUMBER}.1")
         alerts_future = pool.submit(_poll_alerts, client)
         supplies_future = pool.submit(_poll_supply_data, client)
+        trays_future = pool.submit(_poll_input_trays, client)
 
         status = status_future.result()
         device_status_item = device_future.result()
@@ -495,6 +574,7 @@ def poll_printer(host: str, community: str = "public", port: int = 161,
         serial_item = serial_future.result()
         alerts = alerts_future.result()
         supplies = supplies_future.result()
+        trays = trays_future.result()
 
     printer_index = None
     printer_status = None
@@ -595,6 +675,7 @@ def poll_printer(host: str, community: str = "public", port: int = 161,
         "notices": notices,
         "alerts": alerts,
         "supplies": supplies,
+        "trays": trays,
         "toner_text": ", ".join(toner_values) if toner_values else "Уровень тонера не сообщается",
         "snmp_version_used": "1" if client.version == 0 else "2c",
         "polled_at": time.time(),

@@ -433,3 +433,72 @@ def test_input_tray_unknown_values_are_not_treated_as_negative_sheet_counts():
     assert result[0]["current"] == -2
     assert result[0]["max_capacity"] == -2
     assert result[0]["percent"] is None
+
+
+
+def test_input_tray_status_oid_is_printer_mib_column_11():
+    from print_round_robin import snmp_monitor
+
+    assert snmp_monitor.PRT_INPUT_STATUS == "1.3.6.1.2.1.43.8.2.1.11"
+
+
+def test_closed_or_unavailable_input_tray_is_not_reported_as_empty():
+    from print_round_robin import snmp_monitor
+
+    rows = {
+        snmp_monitor.PRT_INPUT_CAPACITY_UNIT: [
+            snmp_monitor.VarBind(snmp_monitor.PRT_INPUT_CAPACITY_UNIT + ".1.1", 0x02, 8),
+            snmp_monitor.VarBind(snmp_monitor.PRT_INPUT_CAPACITY_UNIT + ".1.2", 0x02, 8),
+        ],
+        snmp_monitor.PRT_INPUT_MAX_CAPACITY: [
+            snmp_monitor.VarBind(snmp_monitor.PRT_INPUT_MAX_CAPACITY + ".1.1", 0x02, 300),
+            snmp_monitor.VarBind(snmp_monitor.PRT_INPUT_MAX_CAPACITY + ".1.2", 0x02, 500),
+        ],
+        snmp_monitor.PRT_INPUT_CURRENT_LEVEL: [
+            snmp_monitor.VarBind(snmp_monitor.PRT_INPUT_CURRENT_LEVEL + ".1.1", 0x02, 0),
+            snmp_monitor.VarBind(snmp_monitor.PRT_INPUT_CURRENT_LEVEL + ".1.2", 0x02, 180),
+        ],
+        snmp_monitor.PRT_INPUT_STATUS: [
+            # unavailableAndOnRequest(1): closed/not currently available
+            snmp_monitor.VarBind(snmp_monitor.PRT_INPUT_STATUS + ".1.1", 0x02, 1),
+            # availableAndIdle(0): main cassette available
+            snmp_monitor.VarBind(snmp_monitor.PRT_INPUT_STATUS + ".1.2", 0x02, 0),
+        ],
+        snmp_monitor.PRT_INPUT_NAME: [
+            snmp_monitor.VarBind(snmp_monitor.PRT_INPUT_NAME + ".1.1", 0x04, b"MP Tray"),
+            snmp_monitor.VarBind(snmp_monitor.PRT_INPUT_NAME + ".1.2", 0x04, b"Cassette 2"),
+        ],
+    }
+
+    class FakeClient:
+        def walk(self, oid, max_rows=80):
+            return rows.get(oid, [])
+
+    result = snmp_monitor._poll_input_trays(FakeClient())
+
+    assert len(result) == 1
+    assert result[0]["input_index"] == 2
+    assert result[0]["current"] == 180
+    assert result[0]["percent"] == 36
+
+
+def test_broken_input_tray_is_not_reported():
+    from print_round_robin import snmp_monitor
+
+    rows = {
+        snmp_monitor.PRT_INPUT_CURRENT_LEVEL: [
+            snmp_monitor.VarBind(snmp_monitor.PRT_INPUT_CURRENT_LEVEL + ".1.1", 0x02, 0),
+        ],
+        snmp_monitor.PRT_INPUT_MAX_CAPACITY: [
+            snmp_monitor.VarBind(snmp_monitor.PRT_INPUT_MAX_CAPACITY + ".1.1", 0x02, 300),
+        ],
+        snmp_monitor.PRT_INPUT_STATUS: [
+            snmp_monitor.VarBind(snmp_monitor.PRT_INPUT_STATUS + ".1.1", 0x02, 3),
+        ],
+    }
+
+    class FakeClient:
+        def walk(self, oid, max_rows=80):
+            return rows.get(oid, [])
+
+    assert snmp_monitor._poll_input_trays(FakeClient()) == []

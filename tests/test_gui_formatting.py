@@ -6,6 +6,7 @@ from print_round_robin.gui import (
     _format_supply_line,
     _format_tray_line,
     _level_color,
+    _packed_sibling,
     _partition_printer_messages,
 )
 
@@ -135,3 +136,53 @@ def test_percent_only_tray_reading_is_supported_when_mib_unit_is_percent():
     }]) == [{
         "label": "Лоток", "value": "28%", "percent": 28, "kind": "tray",
     }]
+
+
+
+def test_toner_label_uses_meter_frame_only_when_it_is_packed():
+    class FakeWidget:
+        def __init__(self, manager):
+            self.manager = manager
+
+        def winfo_manager(self):
+            return self.manager
+
+    meter_frame = FakeWidget("")
+
+    footer = FakeWidget("pack")
+    assert _packed_sibling(
+        {"meter_frame": meter_frame, "footer": footer},
+        "meter_frame", "footer",
+    ) is footer
+
+    meter_frame.manager = "pack"
+    assert _packed_sibling(
+        {"meter_frame": meter_frame, "footer": footer},
+        "meter_frame", "footer",
+    ) is meter_frame
+
+
+def test_printer_update_does_not_abort_other_cards_after_one_render_error():
+    app = object.__new__(PrintRoundRobinApp)
+    app.printer_cards = {"192.0.2.1": {}, "192.0.2.2": {}}
+    app.theme_manager = SimpleNamespace(
+        status={"unknown": {"bg": "#fff", "text": "#000"}},
+    )
+    app.logger = SimpleNamespace(exception=lambda *args, **kwargs: None)
+    rendered = []
+
+    def render(card, row):
+        if row["host"] == "192.0.2.1":
+            raise RuntimeError("broken meter widget")
+        rendered.append(row["host"])
+
+    app._render_printer_card = render
+    app._paint_printer_card = lambda *args: None
+    app._update_printer_meters = lambda *args: None
+
+    app._update_printer_status([
+        {"host": "192.0.2.1"},
+        {"host": "192.0.2.2"},
+    ])
+
+    assert rendered == ["192.0.2.2"]

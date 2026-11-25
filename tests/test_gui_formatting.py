@@ -82,8 +82,18 @@ def test_tray_card_line_shows_current_maximum_percent_and_media():
     }) == "Кассета 2: 180/500 листов (36%) • A4"
 
 
-def test_tray_card_line_hides_unavailable_or_unknown_values():
-    for current, maximum in ((-3, 300), (-2, 300), (180, -2), (None, 300), (180, None)):
+def test_tray_card_line_hides_unknown_values_but_reports_known_paper_presence():
+    assert _format_tray_line({
+        "name": "MP Tray",
+        "current": -3,
+        "max_capacity": 100,
+        "unit": "листов",
+        "capacity_unit": 8,
+        "percent": None,
+        "media_name": "ОБЫЧНАЯ",
+    }) == "MP Tray: не менее 1 листа • ОБЫЧНАЯ"
+
+    for current, maximum in ((-2, 300), (180, -2), (None, 300), (180, None)):
         assert _format_tray_line({
             "name": "Ручная подача",
             "current": current,
@@ -114,7 +124,7 @@ def test_meter_data_contains_only_real_numeric_toner_and_tray_readings():
                 "max_capacity": 500, "capacity_unit": 8, "unit": "листов", "percent": 36,
             },
             {
-                "name": "Ручная подача", "current": -3, "max_capacity": 300,
+                "name": "MP Tray", "current": -3, "max_capacity": 100,
                 "capacity_unit": 8, "unit": "листов", "percent": None,
             },
         ],
@@ -125,6 +135,9 @@ def test_meter_data_contains_only_real_numeric_toner_and_tray_readings():
         {
             "label": "Кассета 2 · A4", "value": "180/500 листов · 36%",
             "percent": 36, "kind": "tray",
+        },
+        {
+            "label": "MP Tray", "value": "≥1 лист", "percent": None, "kind": "tray",
         },
     ]
 

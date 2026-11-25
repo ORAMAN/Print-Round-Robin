@@ -261,8 +261,11 @@ PRT_SUPPLY_LEVEL = "1.3.6.1.2.1.43.11.1.1.9"
 PRT_INPUT_CAPACITY_UNIT = "1.3.6.1.2.1.43.8.2.1.8"
 PRT_INPUT_MAX_CAPACITY = "1.3.6.1.2.1.43.8.2.1.9"
 PRT_INPUT_CURRENT_LEVEL = "1.3.6.1.2.1.43.8.2.1.10"
+PRT_INPUT_STATUS = "1.3.6.1.2.1.43.8.2.1.11"
 PRT_INPUT_MEDIA_NAME = "1.3.6.1.2.1.43.8.2.1.12"
 PRT_INPUT_NAME = "1.3.6.1.2.1.43.8.2.1.13"
+PRT_INPUT_MODEL = "1.3.6.1.2.1.43.8.2.1.15"
+PRT_INPUT_DESCRIPTION = "1.3.6.1.2.1.43.8.2.1.18"
 PRT_ALERT_SEVERITY = "1.3.6.1.2.1.43.18.1.1.2"
 PRT_ALERT_DESCRIPTION = "1.3.6.1.2.1.43.18.1.1.8"
 
@@ -387,8 +390,11 @@ def _poll_input_trays(client: SnmpClient) -> list[dict]:
         "unit": PRT_INPUT_CAPACITY_UNIT,
         "max_capacity": PRT_INPUT_MAX_CAPACITY,
         "current": PRT_INPUT_CURRENT_LEVEL,
+        "status": PRT_INPUT_STATUS,
         "media_name": PRT_INPUT_MEDIA_NAME,
         "name": PRT_INPUT_NAME,
+        "model": PRT_INPUT_MODEL,
+        "description": PRT_INPUT_DESCRIPTION,
     }
     values: dict[str, dict[str, Any]] = {}
     suffixes: set[str] = set()
@@ -406,17 +412,33 @@ def _poll_input_trays(client: SnmpClient) -> list[dict]:
         device_index, input_index = (int(part) for part in indexes)
         current = values["current"].get(suffix)
         maximum = values["max_capacity"].get(suffix)
+        status = values["status"].get(suffix)
         if not isinstance(current, int) and not isinstance(maximum, int):
+            continue
+
+        # RFC 3805 PrtSubUnitStatusTC: availability is encoded in the low
+        # three bits. 1 = unavailable/onRequest, 3 = unavailable/broken.
+        # PA6000x reports a closed MP Tray as 19 (0x13): low bits = 3.
+        # Its open state is 0, while the installed cassette reports 4.
+        # Hide unavailable inputs instead of presenting the closed MP Tray as empty.
+        availability = status & 0x07 if isinstance(status, int) and status >= 0 else None
+        if availability in (1, 3):
             continue
 
         capacity_unit = values["unit"].get(suffix)
         unit_text = _INPUT_CAPACITY_UNITS.get(capacity_unit, "ед.")
         name_value = values["name"].get(suffix)
+        model_value = values["model"].get(suffix)
+        description_value = values["description"].get(suffix)
         media_value = values["media_name"].get(suffix)
         name = _text(name_value) if name_value is not None else ""
+        model = _text(model_value) if model_value is not None else ""
+        description = _text(description_value) if description_value is not None else ""
         media_name = _text(media_value) if media_value is not None else ""
         if not name:
-            name = f"Лоток {input_index}"
+            # Some Kyocera firmware leaves prtInputName empty but reports the
+            # physical feed name in prtInputDescription/prtInputModel.
+            name = description or model or f"Лоток {input_index}"
 
         percent = None
         if isinstance(current, int) and current >= 0 and isinstance(maximum, int) and maximum > 0:
@@ -431,6 +453,8 @@ def _poll_input_trays(client: SnmpClient) -> list[dict]:
             "media_name": media_name,
             "current": current,
             "max_capacity": maximum,
+            "status": status,
+            "availability": availability,
             "capacity_unit": capacity_unit,
             "unit": unit_text,
             "percent": percent,

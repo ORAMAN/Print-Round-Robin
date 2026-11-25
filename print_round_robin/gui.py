@@ -119,23 +119,27 @@ def _supply_display_name(supply: dict) -> str:
 
 
 def _format_tray_line(tray: dict) -> str:
-    """Format only a real, usable tray-load reading; omit Printer-MIB sentinels."""
+    """Format a valid tray reading without treating Printer-MIB sentinels as zero."""
     name = str(tray.get("name") or "").strip()
     if not name:
         index = tray.get("input_index")
         name = f"Лоток {index}" if index is not None else "Лоток"
 
     capacity_unit = tray.get("capacity_unit")
+    current = tray.get("current")
+    maximum = tray.get("max_capacity")
     percent = _normalized_percent(tray.get("percent"))
-    if capacity_unit == 19:
+
+    if capacity_unit == 8 and current == -3:
+        # RFC 3805: -3 means at least one unit remains; the exact level is unknown.
+        line = f"{name}: не менее 1 листа"
+    elif capacity_unit == 19:
         if percent is None:
-            percent = _normalized_percent(tray.get("current"))
+            percent = _normalized_percent(current)
         if percent is None:
             return ""
         line = f"{name}: {percent}%"
     else:
-        current = tray.get("current")
-        maximum = tray.get("max_capacity")
         if (not isinstance(current, int) or isinstance(current, bool) or current < 0
                 or not isinstance(maximum, int) or isinstance(maximum, bool) or maximum <= 0):
             return ""
@@ -201,6 +205,10 @@ def _build_printer_meter_items(supplies: list[dict], trays: list[dict]) -> list[
             if percent is None:
                 continue
             value = f"{percent}%"
+        elif capacity_unit == 8 and current == -3:
+            # Printer-MIB sentinel: at least one sheet remains; exact level unknown.
+            value = "≥1 лист"
+            percent = None
         else:
             if (not isinstance(current, int) or isinstance(current, bool) or current < 0
                     or not isinstance(maximum, int) or isinstance(maximum, bool) or maximum <= 0):
@@ -362,6 +370,8 @@ class PrintRoundRobinApp:
         self.root.after(1000, self._poll_admin_result)
         self.root.after(300, self._refresh_dashboard)
         self.root.after(300, self._refresh_queue_info)
+        self.root.after_idle(self._fit_monitor_panes)
+        self.root.after(700, self._fit_monitor_panes)
         self.root.after(400, self.refresh_drivers)
         self.root.after(900, self.check_virtual_queue)
         if minimized:
@@ -697,6 +707,8 @@ class PrintRoundRobinApp:
         self.printer_grid_columns = 1
         self.printer_grid_rows = 0
         self._rebuild_printer_cards()
+        self.monitor_split = split
+        self.monitor_job_box = job_box
 
         # Отдельная панель показывает фактический ход отправки байтов на RAW TCP.
         self.transfer_box = ttk.LabelFrame(job_box, text="Текущая передача", padding=(7, 5), height=116)
@@ -1632,6 +1644,29 @@ class PrintRoundRobinApp:
             f"  •  {self.store.path}"
         )
 
+    def _fit_monitor_panes(self):
+        """Size the monitoring split from its requested content at startup."""
+        if self._closing or not hasattr(self, "monitor_split"):
+            return
+        try:
+            self.root.update_idletasks()
+            split_height = self.monitor_split.winfo_height()
+            if split_height <= 1:
+                return
+            printer_height = self.printer_box.winfo_reqheight()
+            jobs_height = self.monitor_job_box.winfo_reqheight()
+            # Keep both panels usable; allocate remaining height proportionally
+            # to their actual content, while respecting available screen space.
+            available = max(180, split_height - 8)
+            min_printers = min(180, available // 2)
+            min_jobs = min(140, available // 3)
+            desired = max(min_printers, printer_height)
+            desired = min(desired, available - min_jobs)
+            if desired > 0:
+                self.monitor_split.sashpos(0, desired)
+        except (tk.TclError, AttributeError):
+            pass
+
     def _refresh_dashboard(self):
         if self.engine:
             try:
@@ -1884,8 +1919,9 @@ class PrintRoundRobinApp:
             rows.pop()["frame"].destroy()
 
         for meter, item in zip(rows, items):
-            color = _level_color(item["percent"])
-            meter["percent"] = item["percent"]
+            percent = _normalized_percent(item.get("percent"))
+            color = _level_color(percent) if percent is not None else foreground
+            meter["percent"] = percent if percent is not None else 0
             meter["color"] = color
             meter["frame"].configure(bg=background)
             meter["header"].configure(bg=background)
@@ -1896,8 +1932,14 @@ class PrintRoundRobinApp:
                 text=item["value"], bg=background, fg=color,
             )
             meter["bar"].configure(bg=background)
+            if percent is None:
+                # Keep a factual text-only reading; do not draw a fake 0% bar.
+                meter["bar"].pack_forget()
+            else:
+                meter["bar"].pack(fill="x", pady=(1, 0))
             meter["frame"].pack(fill="x", pady=(0, 2))
-            self._draw_printer_meter(meter)
+            if percent is not None:
+                self._draw_printer_meter(meter)
 
     def _paint_printer_card(self, card: dict, state: str, title: str,
                             detail: str, notices: str, toner: str, footer: str) -> None:

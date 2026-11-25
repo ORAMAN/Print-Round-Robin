@@ -88,6 +88,7 @@ def test_poll_printer_uses_vba_hr_device_description_and_reads_vba_fields(monkey
     assert result["device_status"] == 2
     assert result["status_message"] == "Ready to print."
     assert result["snmp_version_used"] == "2c"
+    assert result["trays"] == []
 
 
 def test_poll_printer_falls_back_to_snmp_v1_when_v2c_does_not_answer(monkeypatch):
@@ -351,3 +352,84 @@ def test_low_consumable_snmp_alerts_are_informational_even_if_agent_says_critica
         {"text": "Мало тонера", "severity": "info"},
         {"text": "Мало бумаги", "severity": "info"},
     ]
+
+
+
+def test_input_tray_table_joins_current_and_maximum_by_both_indexes():
+    from print_round_robin import snmp_monitor
+
+    rows = {
+        snmp_monitor.PRT_INPUT_CAPACITY_UNIT: [
+            snmp_monitor.VarBind(snmp_monitor.PRT_INPUT_CAPACITY_UNIT + ".1.1", 0x02, 8),
+            snmp_monitor.VarBind(snmp_monitor.PRT_INPUT_CAPACITY_UNIT + ".1.2", 0x02, 8),
+        ],
+        snmp_monitor.PRT_INPUT_MAX_CAPACITY: [
+            snmp_monitor.VarBind(snmp_monitor.PRT_INPUT_MAX_CAPACITY + ".1.1", 0x02, 300),
+            snmp_monitor.VarBind(snmp_monitor.PRT_INPUT_MAX_CAPACITY + ".1.2", 0x02, 500),
+        ],
+        snmp_monitor.PRT_INPUT_CURRENT_LEVEL: [
+            snmp_monitor.VarBind(snmp_monitor.PRT_INPUT_CURRENT_LEVEL + ".1.1", 0x02, -3),
+            snmp_monitor.VarBind(snmp_monitor.PRT_INPUT_CURRENT_LEVEL + ".1.2", 0x02, 180),
+        ],
+        snmp_monitor.PRT_INPUT_NAME: [
+            snmp_monitor.VarBind(snmp_monitor.PRT_INPUT_NAME + ".1.1", 0x04, b"MP Tray"),
+            snmp_monitor.VarBind(snmp_monitor.PRT_INPUT_NAME + ".1.2", 0x04, "Кассета 2".encode("utf-8")),
+        ],
+        snmp_monitor.PRT_INPUT_MEDIA_NAME: [
+            snmp_monitor.VarBind(snmp_monitor.PRT_INPUT_MEDIA_NAME + ".1.2", 0x04, b"A4"),
+        ],
+    }
+
+    class FakeClient:
+        def walk(self, oid, max_rows=80):
+            return rows.get(oid, [])
+
+    result = snmp_monitor._poll_input_trays(FakeClient())
+
+    assert [item["input_index"] for item in result] == [1, 2]
+    assert result[0] == {
+        "device_index": 1,
+        "input_index": 1,
+        "name": "MP Tray",
+        "media_name": "",
+        "current": -3,
+        "max_capacity": 300,
+        "capacity_unit": 8,
+        "unit": "листов",
+        "percent": None,
+    }
+    assert result[1]["name"] == "Кассета 2"
+    assert result[1]["media_name"] == "A4"
+    assert result[1]["current"] == 180
+    assert result[1]["max_capacity"] == 500
+    assert result[1]["percent"] == 36
+
+
+def test_input_tray_unknown_values_are_not_treated_as_negative_sheet_counts():
+    from print_round_robin import snmp_monitor
+
+    rows = {
+        snmp_monitor.PRT_INPUT_CAPACITY_UNIT: [
+            snmp_monitor.VarBind(snmp_monitor.PRT_INPUT_CAPACITY_UNIT + ".1.3", 0x02, 8),
+        ],
+        snmp_monitor.PRT_INPUT_MAX_CAPACITY: [
+            snmp_monitor.VarBind(snmp_monitor.PRT_INPUT_MAX_CAPACITY + ".1.3", 0x02, -2),
+        ],
+        snmp_monitor.PRT_INPUT_CURRENT_LEVEL: [
+            snmp_monitor.VarBind(snmp_monitor.PRT_INPUT_CURRENT_LEVEL + ".1.3", 0x02, -2),
+        ],
+        snmp_monitor.PRT_INPUT_NAME: [
+            snmp_monitor.VarBind(snmp_monitor.PRT_INPUT_NAME + ".1.3", 0x04, b"Tray 3"),
+        ],
+    }
+
+    class FakeClient:
+        def walk(self, oid, max_rows=80):
+            return rows.get(oid, [])
+
+    result = snmp_monitor._poll_input_trays(FakeClient())
+
+    assert len(result) == 1
+    assert result[0]["current"] == -2
+    assert result[0]["max_capacity"] == -2
+    assert result[0]["percent"] is None

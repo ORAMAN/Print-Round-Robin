@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from print_round_robin.gui import (
     PrintRoundRobinApp,
     _format_supply_line,
+    _format_tray_line,
     _partition_printer_messages,
 )
 
@@ -65,3 +66,28 @@ def test_theme_refresh_passes_information_slot_to_printer_card_painter():
     assert calls[0][4] == ""
     assert calls[0][5] == "Тонер: —"
     assert calls[0][6] == "SNMP: —"
+
+
+
+def test_tray_card_line_shows_current_maximum_percent_and_media():
+    assert _format_tray_line({
+        "name": "Кассета 2",
+        "input_index": 2,
+        "current": 180,
+        "max_capacity": 500,
+        "unit": "листов",
+        "capacity_unit": 8,
+        "percent": 36,
+        "media_name": "A4",
+    }) == "Кассета 2: 180/500 листов (36%) • A4"
+
+
+def test_tray_card_line_formats_printer_mib_sentinel_values():
+    assert _format_tray_line({
+        "name": "Ручная подача",
+        "current": -3,
+        "max_capacity": 300,
+        "unit": "листов",
+        "capacity_unit": 8,
+        "percent": None,
+    }) == "Ручная подача: не менее 1/300 листов"

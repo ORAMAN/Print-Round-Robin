@@ -186,3 +186,32 @@ def test_printer_update_does_not_abort_other_cards_after_one_render_error():
     ])
 
     assert rendered == ["192.0.2.2"]
+
+
+
+def test_event_pump_continues_after_ui_callback_exception_and_reschedules():
+    import queue
+
+    app = object.__new__(PrintRoundRobinApp)
+    app.events = queue.Queue()
+    app.events.put({"type": "printers", "printers": []})
+    app.events.put({"type": "engine", "running": True})
+    app._closing = False
+    app.logger = SimpleNamespace(exception=lambda *args, **kwargs: None)
+    scheduled = []
+    processed = []
+    app.root = SimpleNamespace(after=lambda delay, callback: scheduled.append((delay, callback)))
+
+    def broken_printer_update(_printers):
+        raise RuntimeError("simulated Tk widget failure")
+
+    app._update_printer_status = broken_printer_update
+    app._set_engine_state = lambda running: processed.append(running)
+
+    app._poll_events()
+
+    assert processed == [True]
+    assert app.events.unfinished_tasks == 0
+    assert len(scheduled) == 1
+    assert scheduled[0][0] == 150
+    assert callable(scheduled[0][1])

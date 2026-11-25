@@ -362,6 +362,8 @@ class PrintRoundRobinApp:
         self.root.after(1000, self._poll_admin_result)
         self.root.after(300, self._refresh_dashboard)
         self.root.after(300, self._refresh_queue_info)
+        self.root.after_idle(self._fit_monitor_panes)
+        self.root.after(700, self._fit_monitor_panes)
         self.root.after(400, self.refresh_drivers)
         self.root.after(900, self.check_virtual_queue)
         if minimized:
@@ -697,6 +699,8 @@ class PrintRoundRobinApp:
         self.printer_grid_columns = 1
         self.printer_grid_rows = 0
         self._rebuild_printer_cards()
+        self.monitor_split = split
+        self.monitor_job_box = job_box
 
         # Отдельная панель показывает фактический ход отправки байтов на RAW TCP.
         self.transfer_box = ttk.LabelFrame(job_box, text="Текущая передача", padding=(7, 5), height=116)
@@ -1631,6 +1635,29 @@ class PrintRoundRobinApp:
             ("Ретранслятор активен" if running else "Ретранслятор остановлен") +
             f"  •  {self.store.path}"
         )
+
+    def _fit_monitor_panes(self):
+        """Size the monitoring split from its requested content at startup."""
+        if self._closing or not hasattr(self, "monitor_split"):
+            return
+        try:
+            self.root.update_idletasks()
+            split_height = self.monitor_split.winfo_height()
+            if split_height <= 1:
+                return
+            printer_height = self.printer_box.winfo_reqheight()
+            jobs_height = self.monitor_job_box.winfo_reqheight()
+            # Keep both panels usable; allocate remaining height proportionally
+            # to their actual content, while respecting available screen space.
+            available = max(180, split_height - 8)
+            min_printers = min(180, available // 2)
+            min_jobs = min(140, available // 3)
+            desired = max(min_printers, printer_height)
+            desired = min(desired, available - min_jobs)
+            if desired > 0:
+                self.monitor_split.sashpos(0, desired)
+        except (tk.TclError, AttributeError):
+            pass
 
     def _refresh_dashboard(self):
         if self.engine:

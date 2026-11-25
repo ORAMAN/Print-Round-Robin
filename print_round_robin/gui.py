@@ -2020,7 +2020,9 @@ class PrintRoundRobinApp:
                 lines.append("ВНИМАНИЕ: это последнее сохранённое состояние; текущий опрос SNMP не отвечает.")
             lines.append(f"SNMP-имя: {device.get('name', '—')}")
             lines.append(f"Последний опрос: {time.strftime('%d.%m.%Y %H:%M:%S', time.localtime(device.get('polled_at', time.time())))}")
-            supply_data = device.get("supplies") or web.get("supplies") or []
+            supply_data = [] if device.get("stale") else (device.get("supplies") or [])
+            if not supply_data and not web.get("stale"):
+                supply_data = web.get("supplies") or []
             supply_lines = [
                 _format_supply_line(item) for item in supply_data
             ]
@@ -2029,8 +2031,9 @@ class PrintRoundRobinApp:
                 lines.extend(["", "РАСХОДНЫЕ МАТЕРИАЛЫ:"])
                 lines.extend(f" • {line}" for line in supply_lines)
 
+            tray_data = [] if device.get("stale") else (device.get("trays") or [])
             tray_lines = [
-                _format_tray_line(item) for item in device.get("trays", [])
+                _format_tray_line(item) for item in tray_data
             ]
             tray_lines = [line for line in tray_lines if line]
             if tray_lines:

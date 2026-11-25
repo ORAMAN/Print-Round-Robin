@@ -461,10 +461,10 @@ def test_closed_or_unavailable_input_tray_is_not_reported_as_empty():
             snmp_monitor.VarBind(snmp_monitor.PRT_INPUT_CURRENT_LEVEL + ".1.2", 0x02, 180),
         ],
         snmp_monitor.PRT_INPUT_STATUS: [
-            # unavailableAndOnRequest(1): closed/not currently available
-            snmp_monitor.VarBind(snmp_monitor.PRT_INPUT_STATUS + ".1.1", 0x02, 1),
-            # availableAndIdle(0): main cassette available
-            snmp_monitor.VarBind(snmp_monitor.PRT_INPUT_STATUS + ".1.2", 0x02, 0),
+            # Actual PA6000x response: closed MP Tray = 19 (low bits 3).
+            snmp_monitor.VarBind(snmp_monitor.PRT_INPUT_STATUS + ".1.1", 0x02, 19),
+            # Actual PA6000x response: loaded Cassette 1 = availableAndActive(4).
+            snmp_monitor.VarBind(snmp_monitor.PRT_INPUT_STATUS + ".1.2", 0x02, 4),
         ],
         snmp_monitor.PRT_INPUT_NAME: [
             snmp_monitor.VarBind(snmp_monitor.PRT_INPUT_NAME + ".1.1", 0x04, b"MP Tray"),
@@ -504,3 +504,50 @@ def test_broken_input_tray_is_not_reported():
             return rows.get(oid, [])
 
     assert snmp_monitor._poll_input_trays(FakeClient()) == []
+
+
+
+def test_pa6000x_open_mp_tray_is_reported_without_fabricating_a_paper_level():
+    from print_round_robin import snmp_monitor
+
+    rows = {
+        snmp_monitor.PRT_INPUT_CAPACITY_UNIT: [
+            snmp_monitor.VarBind(snmp_monitor.PRT_INPUT_CAPACITY_UNIT + ".1.1", 0x02, 8),
+            snmp_monitor.VarBind(snmp_monitor.PRT_INPUT_CAPACITY_UNIT + ".1.2", 0x02, 8),
+        ],
+        snmp_monitor.PRT_INPUT_MAX_CAPACITY: [
+            snmp_monitor.VarBind(snmp_monitor.PRT_INPUT_MAX_CAPACITY + ".1.1", 0x02, 100),
+            snmp_monitor.VarBind(snmp_monitor.PRT_INPUT_MAX_CAPACITY + ".1.2", 0x02, 500),
+        ],
+        snmp_monitor.PRT_INPUT_CURRENT_LEVEL: [
+            # PA6000x reports -3 when it knows paper remains but cannot count it.
+            snmp_monitor.VarBind(snmp_monitor.PRT_INPUT_CURRENT_LEVEL + ".1.1", 0x02, -3),
+            snmp_monitor.VarBind(snmp_monitor.PRT_INPUT_CURRENT_LEVEL + ".1.2", 0x02, 500),
+        ],
+        snmp_monitor.PRT_INPUT_STATUS: [
+            snmp_monitor.VarBind(snmp_monitor.PRT_INPUT_STATUS + ".1.1", 0x02, 0),
+            snmp_monitor.VarBind(snmp_monitor.PRT_INPUT_STATUS + ".1.2", 0x02, 4),
+        ],
+        snmp_monitor.PRT_INPUT_DESCRIPTION: [
+            snmp_monitor.VarBind(snmp_monitor.PRT_INPUT_DESCRIPTION + ".1.1", 0x04, b"MP Tray"),
+        ],
+        snmp_monitor.PRT_INPUT_MODEL: [
+            snmp_monitor.VarBind(snmp_monitor.PRT_INPUT_MODEL + ".1.1", 0x04, b"MP Tray"),
+        ],
+    }
+
+    class FakeClient:
+        def walk(self, oid, max_rows=80):
+            return rows.get(oid, [])
+
+    result = snmp_monitor._poll_input_trays(FakeClient())
+
+    assert len(result) == 2
+    manual = result[0]
+    assert manual["input_index"] == 1
+    assert manual["name"] == "MP Tray"
+    assert manual["current"] == -3
+    assert manual["availability"] == 0
+    assert manual["percent"] is None
+    assert result[1]["input_index"] == 2
+    assert result[1]["current"] == 500
